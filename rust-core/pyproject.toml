@@ -5,9 +5,24 @@ build-backend = "maturin"
 [project]
 name = "pyferox-rust"
 version = "0.1.0"
-description = "Rust acceleration core for PyFerOx"
+description = "Rust acceleration core for PyFerOx: compiled schema validation, query coercion, and fast JSON serialization."
+readme = "README.md"
+license = "MIT"
+authors = [{name = "PyFerOx Maintainers"}]
 requires-python = ">=3.11"
+keywords = ["rust", "python", "validation", "serialization", "api", "django", "async"]
 classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
   "Programming Language :: Rust",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: Implementation :: CPython",
 ]
+
+[project.urls]
+Homepage = "https://github.com/pablo0723/pyferox"
+Repository = "https://github.com/pablo0723/pyferox"
+Issues = "https://github.com/pablo0723/pyferox/issues"

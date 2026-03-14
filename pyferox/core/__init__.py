@@ -1,4 +1,7 @@
-from pyferox.core import (
+from pyferox.errors import HTTPError
+from pyferox.response import JSONResponse, Response
+from pyferox.schema import Schema
+from pyferox.serializers import (
     BooleanField,
     DateField,
     DateTimeField,
@@ -7,14 +10,10 @@ from pyferox.core import (
     EmailField,
     Field,
     FloatField,
-    HTTPError,
     IntegerField,
-    JSONResponse,
     ListField,
     ModelSerializer,
     Nested,
-    Response,
-    Schema,
     Serializer,
     StringField,
     TimeField,
@@ -22,15 +21,9 @@ from pyferox.core import (
     UUIDField,
     ValidationError,
 )
-from pyferox.django import DjangoAPI, as_django_view
-
-API = DjangoAPI
 
 __all__ = [
-    "API",
-    "DjangoAPI",
     "HTTPError",
-    "as_django_view",
     "Response",
     "JSONResponse",
     "Schema",

@@ -44,6 +44,30 @@ class Request:
             body=body,
         )
 
+    @classmethod
+    def from_django(cls, request, path_params: dict[str, str] | None = None):
+        headers = {}
+        for key, value in request.META.items():
+            if key.startswith("HTTP_"):
+                header_name = key[5:].replace("_", "-").lower()
+                headers[header_name] = str(value)
+        if "CONTENT_TYPE" in request.META:
+            headers["content-type"] = str(request.META["CONTENT_TYPE"])
+        if "CONTENT_LENGTH" in request.META:
+            headers["content-length"] = str(request.META["CONTENT_LENGTH"])
+
+        query_params = {k: v for k, v in request.GET.items()}
+        wrapped = cls(
+            method=request.method.upper(),
+            path=request.path,
+            headers=headers,
+            query_params=query_params,
+            path_params=path_params or {},
+            body=request.body or b"",
+            user=getattr(request, "user", None),
+        )
+        return wrapped
+
     @property
     def json_body(self):
         if self._json_cache is not None:

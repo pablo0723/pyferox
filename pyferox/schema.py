@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import get_args, get_origin
+
 from .errors import HTTPError
 from .rust_bridge import compile_schema, validate_compiled, validate_query_compiled
 
@@ -50,7 +52,14 @@ class Schema:
 
 
 def _type_to_name(field_type) -> str:
-    if field_type in (str, int, float, bool):
+    if field_type in (str, int, float, bool, dict, list):
         return field_type.__name__
+    origin = get_origin(field_type)
+    if origin in (list, dict):
+        return origin.__name__
+    if origin is not None:
+        args = get_args(field_type)
+        non_none = [arg for arg in args if arg is not type(None)]
+        if len(non_none) == 1 and len(non_none) != len(args):
+            return _type_to_name(non_none[0])
     raise TypeError(f"Unsupported schema field type: {field_type!r}")
-

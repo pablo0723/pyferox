@@ -1,37 +1,26 @@
-from pyferox import API, HTTPError, Schema
-from pyferox.response import JSONResponse
+from pyferox import API, Field, Serializer
 
 
-class CreateUserIn(Schema):
+class CreateUserIn(Serializer):
     name: str
-    age: int
+    age: int = Field(required=False, default=18)
 
 
-class CreateUserOut(Schema):
+class CreateUserOut(Serializer):
     id: int
     name: str
     age: int
 
 
-app = API()
+app = API(prefix="api")
 
 
-@app.post("/users", input_schema=CreateUserIn, output_schema=CreateUserOut)
+@app.post("users", input_schema=CreateUserIn, output_schema=CreateUserOut)
 async def create_user(request):
-    payload = request.json_body
-    if payload["age"] < 0:
-        raise HTTPError(422, "age must be >= 0")
+    payload = request.data
     return {"id": 1, **payload}
 
 
-@app.get("/users/{user_id}")
-def get_user(request):
-    user_id = request.path_params.get("user_id")
-    if user_id != "1":
-        raise HTTPError(404, "user not found")
-    return JSONResponse({"id": 1, "name": "Ada", "age": 33})
-
-
 if __name__ == "__main__":
-    print("PyFerOx MVP app is ready.")
-    print("Use an ASGI server to run: uvicorn main:app")
+    print("PyFerOx Django-first example loaded.")
+    print("Use `include(app.urls)` inside Django urlpatterns.")
