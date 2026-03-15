@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -84,11 +85,14 @@ class Container:
             return entry.instance
         if entry.factory is None:
             raise ResolutionError(f"Provider for type {entry.key} has neither instance nor factory")
-        try:
+        signature = inspect.signature(entry.factory)
+        positional = [
+            param
+            for param in signature.parameters.values()
+            if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        ]
+        if len(positional) >= 2:
             return entry.factory(self, scoped_cache)
-        except TypeError:
-            try:
-                return entry.factory(self)
-            except TypeError:
-                return entry.factory()
-
+        if len(positional) == 1:
+            return entry.factory(self)
+        return entry.factory()

@@ -35,19 +35,32 @@ Layering:
 
 ### Phase 1 (implemented in this repo)
 
-- `App` kernel
-- `Module` registration
-- `@handle` command/query handlers
-- `@listen` event listeners (local mode)
-- Type-based DI container with scopes (`APP`, `REQUEST`, `JOB`)
-- Basic tests for dispatch + scope behavior
+- Core runtime:
+  - `App` kernel, lifecycle hooks, module imports
+  - Handler registry + dispatcher execution pipeline
+  - Command/query/event handling (`@handle`, `@listen`)
+  - DI scopes (`APP`, `REQUEST`, `JOB`)
+  - Execution context and middleware/interceptor pipeline
+- Developer foundation:
+  - Typed config + env/profile loading (`dev`/`test`/`prod`)
+  - Validation/schema parsing + output serialization
+  - Unified framework/domain errors and transport mapping
+  - Result models (`Success`, `Paginated`, `Empty`)
+  - Logging middleware hooks
+  - Auth contracts (identity/principal/backend/permission checker)
+- First transport + persistence:
+  - ASGI HTTP adapter (`HTTPAdapter`)
+  - SQLAlchemy integration (`sqlalchemy_module`, `UnitOfWork`, `Repository`)
+- Dev experience:
+  - CLI bootstrap (`create-project`, `create-module`, `run-dev`)
+  - Testing utilities (`create_test_app`, `TestHTTPClient`, `FakeDispatcher`)
 
 ### Phase 2
 
-- HTTP transport adapter (ASGI)
-- Request-scoped DI middleware
-- Input/output contract layer (Pydantic or msgspec)
-- Error mapping contract
+- Production-grade transport adapters (HTTP/RPC/CLI worker convergence)
+- Extended schema engine (Pydantic/msgspec backends)
+- Auth module implementation (tokens, sessions, policies)
+- Metrics/tracing exporters and richer observability
 
 ### Phase 3
 
@@ -80,8 +93,8 @@ Layering:
 
 ## 5. Near-term implementation backlog
 
-1. Add `http` package with minimal ASGI adapter calling `App.execute`.
-2. Define standardized application errors and adapter-level error mapping.
-3. Add SQLAlchemy module with async session factory + UoW.
-4. Add sample app in `examples/demo_app` using Users + Billing modules.
-5. Add docs for module authoring conventions and best practices.
+1. Add production-ready sample app in `examples/demo_app`.
+2. Add pluggable auth implementation module on top of current contracts.
+3. Add RPC/queue adapters with shared execution context propagation.
+4. Add migration wrapper and database test transaction fixtures.
+5. Add module authoring guide and architecture decision records.

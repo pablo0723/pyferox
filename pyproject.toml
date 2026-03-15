@@ -6,7 +6,10 @@ readme = "README.md"
 license = "MIT"
 authors = [{name = "PyFerOx Maintainers"}]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+  "anyio>=4.4.0",
+  "sqlalchemy>=2.0.30",
+]
 keywords = ["framework", "service", "cqrs", "event-driven", "async", "backend"]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -24,7 +27,12 @@ dev = [
   "twine>=5.1.1",
   "pytest>=8.3.0",
   "pytest-cov>=5.0.0",
+  "aiosqlite>=0.20.0",
 ]
+http = ["uvicorn>=0.30.0"]
+
+[project.scripts]
+pyferox = "pyferox.cli.main:main"
 
 [project.urls]
 Homepage = "https://github.com/pablo0723/pyferox"

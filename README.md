@@ -9,11 +9,23 @@ Applications are built around commands, queries, events, services, and repositor
 
 Phase 1 foundation is implemented:
 
-- Application kernel (`App`)
-- Module system (`Module`)
-- Command/query handlers (`@handle`)
-- Local event listeners (`@listen`)
-- Lightweight dependency injection with scopes
+- Application kernel + lifecycle hooks (`startup` / `shutdown`)
+- Module system with imports and lifecycle hooks
+- Handler registry + dispatcher pipeline
+- Command/query/event abstractions
+- DI container with application/request/job scopes
+- Execution context (`request_id`, `trace_id`, `current_user`, metadata)
+- Middleware/interceptor pipeline + pre/post hooks
+- Typed config system (`AppConfig`, `DatabaseConfig`, `HttpConfig`) with env/profile loading
+- Validation/schema runtime (`parse_input`, `serialize_output`, `ValidationError`)
+- Unified error model and HTTP transport mapping
+- Result/response models (`Success`, `Paginated`, `Empty`)
+- Logging middleware hooks (`RequestLoggingMiddleware`)
+- Basic auth contracts (`Identity`, `Principal`, `AuthBackend`, `PermissionChecker`)
+- HTTP adapter (`HTTPAdapter`) with typed route-to-message mapping
+- SQLAlchemy integration (`sqlalchemy_module`, `UnitOfWork`, `Repository`)
+- CLI bootstrap (`pyferox create-project`, `create-module`, `run-dev`)
+- Testing utilities (`create_test_app`, `TestHTTPClient`, `FakeDispatcher`)
 
 ## Quickstart
 
@@ -66,6 +78,30 @@ Any transport adapter (HTTP, RPC, CLI, worker, queue) can call the same API:
 
 - `await app.execute(command_or_query)`
 - `await app.publish(event)`
+
+## HTTP transport (ASGI)
+
+```python
+from pyferox import HTTPAdapter
+
+http = HTTPAdapter(app)
+http.command("POST", "/users", CreateUser, status_code=201)
+http.query("GET", "/users/{user_id}", GetUser)
+```
+
+Use with any ASGI server, for example:
+
+```bash
+uvicorn your_module:http
+```
+
+## CLI bootstrap
+
+```bash
+pyferox create-project demo_service
+pyferox create-module users --project demo_service/app
+pyferox run-dev --target app.main:http
+```
 
 ## Install
 
