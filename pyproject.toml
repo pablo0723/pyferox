@@ -1,23 +1,21 @@
 [project]
 name = "pyferox"
 version = "0.0.1"
-description = "Async-first DRF-style API framework for Django with Rust-accelerated validation and serialization."
+description = "Transport-agnostic, async-first modular service application framework."
 readme = "README.md"
 license = "MIT"
 authors = [{name = "PyFerOx Maintainers"}]
-requires-python = ">=3.11"
-dependencies = ["pyferox-rust>=0.1.0"]
-keywords = ["django", "drf", "api", "async", "rust", "serializer", "validation"]
+requires-python = ">=3.12"
+dependencies = []
+keywords = ["framework", "service", "cqrs", "event-driven", "async", "backend"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
-  "Framework :: Django",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Framework :: AsyncIO",
-  "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+  "Topic :: Software Development :: Libraries :: Application Frameworks",
 ]
 
 [project.optional-dependencies]

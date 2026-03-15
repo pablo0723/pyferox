@@ -1,48 +1,21 @@
-from pyferox.errors import HTTPError
-from pyferox.response import JSONResponse, Response
-from pyferox.schema import Schema
-from pyferox.serializers import (
-    BooleanField,
-    DateField,
-    DateTimeField,
-    DecimalField,
-    DictField,
-    EmailField,
-    Field,
-    FloatField,
-    IntegerField,
-    ListField,
-    ModelSerializer,
-    Nested,
-    Serializer,
-    StringField,
-    TimeField,
-    URLField,
-    UUIDField,
-    ValidationError,
-)
+"""Core primitives for transport-agnostic service applications."""
+
+from pyferox.core.app import App
+from pyferox.core.di import ResolutionError, Scope, provider, singleton
+from pyferox.core.handlers import handle, listen
+from pyferox.core.messages import Command, Event, Query
+from pyferox.core.module import Module
 
 __all__ = [
-    "HTTPError",
-    "Response",
-    "JSONResponse",
-    "Schema",
-    "Field",
-    "StringField",
-    "IntegerField",
-    "FloatField",
-    "BooleanField",
-    "EmailField",
-    "URLField",
-    "UUIDField",
-    "DateField",
-    "DateTimeField",
-    "TimeField",
-    "DecimalField",
-    "ListField",
-    "DictField",
-    "Nested",
-    "Serializer",
-    "ModelSerializer",
-    "ValidationError",
+    "App",
+    "Command",
+    "Event",
+    "Module",
+    "Query",
+    "ResolutionError",
+    "Scope",
+    "handle",
+    "listen",
+    "provider",
+    "singleton",
 ]
