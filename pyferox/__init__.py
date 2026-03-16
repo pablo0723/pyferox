@@ -32,7 +32,7 @@ from pyferox.core import (
     singleton,
     to_payload,
 )
-from pyferox.schema import parse_input, serialize_output
+from pyferox.schema import SchemaModel, parse_input, serialize_output
 from pyferox.http import HTTPAdapter
 
 __all__ = [
@@ -57,6 +57,7 @@ __all__ = [
     "ResolutionError",
     "RouteConflictError",
     "Scope",
+    "SchemaModel",
     "Streamed",
     "Success",
     "SyncPolicy",

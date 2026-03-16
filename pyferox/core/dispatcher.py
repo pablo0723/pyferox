@@ -74,12 +74,11 @@ class Dispatcher:
         async def invoke(msg: Any) -> Any:
             return await self._invoke(handler, msg, context, scoped_cache)
         call_next = compose_middlewares(middlewares=self.middlewares, context=context, terminal=invoke)
-
-        result = await call_next(message)
-
-        for hook in self.post_hooks:
-            await hook(context, message)
-        return result
+        try:
+            return await call_next(message)
+        finally:
+            for hook in self.post_hooks:
+                await hook(context, message)
 
     async def _invoke(
         self,

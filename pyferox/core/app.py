@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Iterable
+from contextlib import asynccontextmanager
 from typing import Any
 
 from pyferox.core.context import ExecutionContext
@@ -54,6 +55,14 @@ class App:
             if inspect.isawaitable(result):
                 await result
         self._started = False
+
+    @asynccontextmanager
+    async def lifespan(self):
+        await self.startup()
+        try:
+            yield self
+        finally:
+            await self.shutdown()
 
     async def execute(self, message: Any) -> Any:
         context = ExecutionContext()

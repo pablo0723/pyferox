@@ -8,12 +8,16 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import parse_qs
 
+from pyferox.auth import AuthBackend, PermissionChecker
 from pyferox.core import App, ExecutionContext
 from pyferox.core.errors import (
+    AuthError,
+    ForbiddenError,
     RouteConflictError,
     ValidationError,
     map_exception_to_transport,
 )
+from pyferox.core.results import Streamed
 from pyferox.schema import parse_input, serialize_output
 
 
@@ -23,6 +27,7 @@ class Route:
     path: str
     message_type: type[Any]
     status_code: int
+    permission: str | None = None
     pattern: re.Pattern[str] = field(init=False)
 
     def __post_init__(self) -> None:
@@ -40,15 +45,55 @@ class Route:
 class HTTPAdapter:
     """ASGI app that maps HTTP requests to app commands and queries."""
 
-    def __init__(self, app: App) -> None:
+    def __init__(
+        self,
+        app: App,
+        *,
+        auth_backend: AuthBackend | None = None,
+        permission_checker: PermissionChecker | None = None,
+    ) -> None:
         self.app = app
+        self._auth_backend = auth_backend
+        self._permission_checker = permission_checker
         self._routes: list[Route] = []
 
-    def command(self, method: str, path: str, message_type: type[Any], status_code: int = 202) -> None:
-        self._register(Route(method=method.upper(), path=path, message_type=message_type, status_code=status_code))
+    def command(
+        self,
+        method: str,
+        path: str,
+        message_type: type[Any],
+        status_code: int = 202,
+        *,
+        permission: str | None = None,
+    ) -> None:
+        self._register(
+            Route(
+                method=method.upper(),
+                path=path,
+                message_type=message_type,
+                status_code=status_code,
+                permission=permission,
+            )
+        )
 
-    def query(self, method: str, path: str, message_type: type[Any], status_code: int = 200) -> None:
-        self._register(Route(method=method.upper(), path=path, message_type=message_type, status_code=status_code))
+    def query(
+        self,
+        method: str,
+        path: str,
+        message_type: type[Any],
+        status_code: int = 200,
+        *,
+        permission: str | None = None,
+    ) -> None:
+        self._register(
+            Route(
+                method=method.upper(),
+                path=path,
+                message_type=message_type,
+                status_code=status_code,
+                permission=permission,
+            )
+        )
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         if scope["type"] != "http":
@@ -73,7 +118,21 @@ class HTTPAdapter:
                 request_id=_header(scope, b"x-request-id") or ExecutionContext().request_id,
                 trace_id=_header(scope, b"x-trace-id"),
             )
+            if self._auth_backend is not None:
+                token = _bearer_token(_header(scope, b"authorization"))
+                context.current_user = await self._auth_backend.authenticate(token)
+            if route.permission is not None:
+                if context.current_user is None:
+                    raise AuthError("Authentication required")
+                if self._permission_checker is None:
+                    raise ForbiddenError("Permission checker is not configured")
+                allowed = await self._permission_checker.allowed(context.current_user, route.permission)
+                if not allowed:
+                    raise ForbiddenError("Permission denied")
             result = await self.app.execute_with_context(message, context=context)
+            if isinstance(result, Streamed):
+                await _send_stream(send, route.status_code, result)
+                return
             response_body = serialize_output(result if result is not None else {})
             await _send_json(send, route.status_code, response_body)
         except Exception as exc:
@@ -131,17 +190,17 @@ async def _read_json_body(receive: Any) -> dict[str, Any]:
     raw = b"".join(body_chunks).strip()
     if not raw:
         return {}
-    parsed = json.loads(raw.decode("utf-8"))
+    try:
+        parsed = json.loads(raw.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValidationError("Invalid JSON body") from exc
     if not isinstance(parsed, dict):
         raise ValidationError("JSON body must be an object")
     return parsed
 
 
 def _map_error(exc: Exception) -> tuple[int, dict[str, Any]]:
-    status, payload = map_exception_to_transport(exc)
-    if status == 500 and "error" in payload and payload["error"] == "Internal server error":
-        payload = {"error": f"{payload['error']}: {exc}"}
-    return status, payload
+    return map_exception_to_transport(exc)
 
 
 def _header(scope: dict[str, Any], key: bytes) -> str | None:
@@ -151,8 +210,40 @@ def _header(scope: dict[str, Any], key: bytes) -> str | None:
     return None
 
 
+def _bearer_token(authorization: str | None) -> str | None:
+    if authorization is None:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return None
+    return token
+
+
 async def _send_json(send: Any, status_code: int, payload: Any) -> None:
     body = json.dumps(payload, default=str).encode("utf-8")
     headers = [(b"content-type", b"application/json")]
     await send({"type": "http.response.start", "status": status_code, "headers": headers})
     await send({"type": "http.response.body", "body": body, "more_body": False})
+
+
+async def _send_stream(send: Any, status_code: int, result: Streamed) -> None:
+    headers = [(b"content-type", result.content_type.encode("utf-8"))]
+    await send({"type": "http.response.start", "status": status_code, "headers": headers})
+    chunks = result.chunks
+    if hasattr(chunks, "__aiter__"):
+        async for chunk in chunks:  # type: ignore[union-attr]
+            await send({"type": "http.response.body", "body": _stream_chunk_to_bytes(chunk), "more_body": True})
+    else:
+        for chunk in chunks:
+            await send({"type": "http.response.body", "body": _stream_chunk_to_bytes(chunk), "more_body": True})
+    await send({"type": "http.response.body", "body": b"", "more_body": False})
+
+
+def _stream_chunk_to_bytes(chunk: Any) -> bytes:
+    if isinstance(chunk, bytes):
+        return chunk
+    if isinstance(chunk, str):
+        return chunk.encode("utf-8")
+    if isinstance(chunk, (dict, list)):
+        return json.dumps(chunk, default=str).encode("utf-8")
+    return str(chunk).encode("utf-8")

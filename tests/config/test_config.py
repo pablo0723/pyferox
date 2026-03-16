@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from pyferox.config import ConfigProfile, load_config
+from pyferox.config import ChainedSecretProvider, ConfigProfile, DictSecretProvider, FileSecretProvider, load_config
 
 
 def test_load_config_from_environment(monkeypatch) -> None:
@@ -34,3 +34,25 @@ def test_load_config_invalid_type_raises(monkeypatch) -> None:
     monkeypatch.setenv("PYFEROX_HTTP_PORT", "not-a-port")
     with pytest.raises(ValueError):
         load_config(load_dotenv=False)
+
+
+def test_load_config_reads_secret_from_custom_provider() -> None:
+    cfg = load_config(load_dotenv=False, secret_provider=DictSecretProvider({"PYFEROX_SECRET_KEY": "secret-1"}))
+    assert cfg.secret_key == "secret-1"
+
+
+def test_file_secret_provider_reads_from_directory(tmp_path: Path) -> None:
+    (tmp_path / "PYFEROX_SECRET_KEY").write_text("from-file\n", encoding="utf-8")
+    provider = FileSecretProvider(tmp_path)
+    cfg = load_config(load_dotenv=False, secret_provider=provider)
+    assert cfg.secret_key == "from-file"
+
+
+def test_chained_secret_provider_uses_first_match(tmp_path: Path) -> None:
+    (tmp_path / "PYFEROX_SECRET_KEY").write_text("file-value\n", encoding="utf-8")
+    provider = ChainedSecretProvider(
+        DictSecretProvider({"PYFEROX_SECRET_KEY": "dict-value"}),
+        FileSecretProvider(tmp_path),
+    )
+    cfg = load_config(load_dotenv=False, secret_provider=provider)
+    assert cfg.secret_key == "dict-value"

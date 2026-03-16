@@ -63,7 +63,7 @@ class DBSessionMiddleware:
     async def __call__(self, context: ExecutionContext, message: Any, call_next: NextCallable) -> Any:
         session = self._session_factory()
         context.db_session = session
-        context.services["db_session"] = session
+        context.set_service("db_session", session)
         try:
             return await call_next(message)
         finally:

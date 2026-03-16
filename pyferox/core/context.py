@@ -14,3 +14,9 @@ class ExecutionContext:
     db_session: object | None = None
     services: dict[str, object] = field(default_factory=dict)
     metadata: dict[str, object] = field(default_factory=dict)
+
+    def set_service(self, name: str, value: object) -> None:
+        self.services[name] = value
+
+    def get_service(self, name: str, default: object | None = None) -> object | None:
+        return self.services.get(name, default)

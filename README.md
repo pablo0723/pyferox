@@ -9,20 +9,20 @@ Applications are built around commands, queries, events, services, and repositor
 
 Phase 1 foundation is implemented:
 
-- Application kernel + lifecycle hooks (`startup` / `shutdown`)
+- Application kernel + lifecycle hooks (`startup` / `shutdown` / `lifespan`)
 - Module system with imports and lifecycle hooks
 - Handler registry + dispatcher pipeline
 - Command/query/event abstractions
 - DI container with application/request/job scopes
 - Execution context (`request_id`, `trace_id`, `current_user`, metadata)
 - Middleware/interceptor pipeline + pre/post hooks
-- Typed config system (`AppConfig`, `DatabaseConfig`, `HttpConfig`) with env/profile loading
-- Validation/schema runtime (`parse_input`, `serialize_output`, `ValidationError`)
-- Unified error model and HTTP transport mapping
-- Result/response models (`Success`, `Paginated`, `Empty`)
+- Typed config system (`AppConfig`, `DatabaseConfig`, `HttpConfig`) with env/profile loading + pluggable secret providers
+- Msgspec-backed validation/schema runtime (`SchemaModel`, `parse_input`, `serialize_output`, `TypedSchema`, `ValidationError`)
+- Unified error model with stable transport payload (`type`, `error`, `details`)
+- Result/response models (`Success`, `Paginated`, `Empty`, `Streamed`)
 - Logging middleware hooks (`RequestLoggingMiddleware`)
 - Basic auth contracts (`Identity`, `Principal`, `AuthBackend`, `PermissionChecker`)
-- HTTP adapter (`HTTPAdapter`) with typed route-to-message mapping
+- HTTP adapter (`HTTPAdapter`) with typed route-to-message mapping, auth/permission checks, streamed responses
 - SQLAlchemy integration (`sqlalchemy_module`, `UnitOfWork`, `Repository`)
 - CLI bootstrap (`pyferox create-project`, `create-module`, `run-dev`)
 - Testing utilities (`create_test_app`, `TestHTTPClient`, `FakeDispatcher`)
@@ -30,9 +30,7 @@ Phase 1 foundation is implemented:
 ## Quickstart
 
 ```python
-from dataclasses import dataclass
-
-from pyferox import App, Command, Module, Query, handle, singleton
+from pyferox import App, Command, Module, Query, SchemaModel, handle, singleton
 
 
 class UserRepo:
@@ -43,14 +41,12 @@ class UserRepo:
         return {"id": user_id, "email": "test@example.com", "name": "User"}
 
 
-@dataclass(slots=True)
-class CreateUser(Command):
+class CreateUser(Command, SchemaModel):
     email: str
     name: str
 
 
-@dataclass(slots=True)
-class GetUser(Query):
+class GetUser(Query, SchemaModel):
     user_id: int
 
 

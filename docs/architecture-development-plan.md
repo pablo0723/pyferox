@@ -33,32 +33,96 @@ Layering:
 
 ## 3. Phase plan
 
-### Phase 1 (implemented in this repo)
+### Phase 1 (implemented; mandatory baseline)
+
+Mandatory checklist (must exist in Phase 1):
+
+1. Config system
+   - env loading (`.env`, `.env.<profile>`)
+   - typed settings (`AppConfig`, `DatabaseConfig`, `HttpConfig`)
+   - profiles (`dev` / `test` / `prod`)
+   - secret handling interface (`SecretProvider`, env/dict/file/chained providers)
+2. Validation / schema layer
+   - command/query input parsing and coercion
+   - output serialization
+   - validation error formatting
+   - typed schema wrapper (`TypedSchema`) on top of msgspec runtime
+3. Request / execution context
+   - request id, trace id
+   - current user
+   - db session
+   - app service bag
+4. Error model
+   - framework exceptions
+   - domain exceptions
+   - auth/validation/not-found/conflict/forbidden categories
+   - transport mapping with stable error payload shape (`type`, `error`, `details`)
+5. Response model / result handling
+   - success result (`Success`)
+   - paginated result (`Paginated`)
+   - empty result (`Empty`)
+   - streamed result contract (`Streamed`; HTTP adapter support)
+6. Middleware / interceptor system
+   - middleware chain
+   - pre/post execution hooks
+   - extension points for logging/auth/tracing/rate-limiting/metrics/db lifecycle
+7. Handler registry / dispatcher
+   - registration + lookup
+   - execution pipeline
+   - pre/post hooks
+   - sync/async policy
+8. App lifecycle
+   - startup/shutdown hooks
+   - module init hooks
+   - resource cleanup
+   - lifespan context manager
+9. Testing utilities
+   - test app factory
+   - HTTP test client
+   - fake dispatcher
+   - dependency overrides
+10. Logging integration
+   - structured request logging hooks
+   - exception logging hooks
+11. Basic auth contract
+   - identity/principal contracts
+   - auth backend interface
+   - permission checker interface
+12. Project scaffolding / CLI bootstrap
+   - `create-project`
+   - `create-module`
+   - `run-dev`
+
+Phase 1 grouped deliverables:
 
 - Core runtime:
-  - `App` kernel, lifecycle hooks, module imports
-  - Handler registry + dispatcher execution pipeline
-  - Command/query/event handling (`@handle`, `@listen`)
-  - DI scopes (`APP`, `REQUEST`, `JOB`)
-  - Execution context and middleware/interceptor pipeline
+  - Application kernel
+  - Module system
+  - Handler registry / dispatcher
+  - Command / Query / Event abstractions
+  - Dependency injection
+  - App lifecycle hooks
+  - Execution context
 - Developer foundation:
-  - Typed config + env/profile loading (`dev`/`test`/`prod`)
-  - Validation/schema parsing + output serialization
-  - Unified framework/domain errors and transport mapping
-  - Result models (`Success`, `Paginated`, `Empty`)
-  - Logging middleware hooks
-  - Auth contracts (identity/principal/backend/permission checker)
+  - Config system
+  - Validation / schema layer
+  - Error model
+  - Result / response model
+  - Middleware / interceptor pipeline
+  - Logging hooks
 - First transport + persistence:
-  - ASGI HTTP adapter (`HTTPAdapter`)
-  - SQLAlchemy integration (`sqlalchemy_module`, `UnitOfWork`, `Repository`)
+  - HTTP adapter
+  - SQLAlchemy integration
+  - Unit of Work base
+  - Repository base abstractions
 - Dev experience:
-  - CLI bootstrap (`create-project`, `create-module`, `run-dev`)
-  - Testing utilities (`create_test_app`, `TestHTTPClient`, `FakeDispatcher`)
+  - CLI bootstrap
+  - Testing utilities
 
 ### Phase 2
 
 - Production-grade transport adapters (HTTP/RPC/CLI worker convergence)
-- Extended schema engine (Pydantic/msgspec backends)
+- Additional schema backends (Pydantic v2 adapter on top of default msgspec runtime)
 - Auth module implementation (tokens, sessions, policies)
 - Metrics/tracing exporters and richer observability
 

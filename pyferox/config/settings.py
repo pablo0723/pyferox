@@ -34,6 +34,17 @@ class DictSecretProvider:
         return self._secrets.get(name)
 
 
+class FileSecretProvider:
+    def __init__(self, directory: str | Path) -> None:
+        self._directory = Path(directory)
+
+    def get(self, name: str) -> str | None:
+        path = self._directory / name
+        if not path.exists() or not path.is_file():
+            return None
+        return path.read_text(encoding="utf-8").strip()
+
+
 class ChainedSecretProvider:
     def __init__(self, *providers: SecretProvider) -> None:
         self._providers = providers
