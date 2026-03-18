@@ -1,113 +1,93 @@
 # PyFerOx
 
-Transport-agnostic, async-first Python service application framework.
+Transport-agnostic, async-first Python service framework built around:
 
-PyFerOx focuses on modular backend architecture where HTTP is one transport among many.  
-Applications are built around commands, queries, events, services, and repositories.
+- typed command/query/event contracts
+- modular composition
+- execution middleware + lifecycle hooks
+- pluggable transports (HTTP, jobs/worker, RPC, scheduler)
 
-## Current phase
+## Project Status
 
-Phase 1 foundation baseline is implemented (see `phase1_audit.md` for done/partial/missing details):
+Phase 1-3 implementation is complete according to repository audits:
 
-- Application kernel + lifecycle hooks (`startup` / `shutdown` / `lifespan`)
-- Module system with imports and lifecycle hooks
-- Handler registry + dispatcher pipeline
-- Command/query/event abstractions
-- DI container with application/request/job scopes
-- Execution context (`request_id`, `trace_id`, `current_user`, metadata)
-- Middleware/interceptor pipeline + pre/post hooks
-- Typed config system (`AppConfig`, `DatabaseConfig`, `HttpConfig`) with env/profile loading + pluggable secret providers
-- Msgspec-backed validation/schema runtime (`SchemaModel`, `parse_input`, `serialize_output`, `TypedSchema`, `ValidationError`)
-- Unified error model with stable transport payload (`type`, `error`, `details`)
-- Result/response models (`Success`, `Paginated`, `Empty`, `Streamed`)
-- Logging middleware hooks (`RequestLoggingMiddleware`)
-- Basic auth contracts (`Identity`, `Principal`, `AuthBackend`, `PermissionChecker`)
-- HTTP adapter (`HTTPAdapter`) with typed route-to-message mapping, auth/permission checks, streamed responses
-- SQLAlchemy integration (`sqlalchemy_module`, `UnitOfWork`, `Repository`)
-- CLI bootstrap (`pyferox create-project`, `create-module`, `run-dev`, `inspect-config`)
-- Testing utilities (`create_test_app`, `TestHTTPClient`, `FakeDispatcher`)
+- [Phase 1 audit](phase1_audit.md)
+- [Phase 2 audit](phase2_audit.md)
+- [Phase 3 audit](phase3_audit.md)
 
-## Quickstart
+## Documentation
+
+Full user docs are in [`docs/`](docs/README.md).
+
+Recommended start:
+
+1. [Quickstart](docs/quickstart.md)
+2. [Core Concepts](docs/core-concepts.md)
+3. [HTTP, Auth, OpenAPI](docs/http-auth-openapi.md)
+4. [Persistence (SQLAlchemy)](docs/persistence-sqlalchemy.md)
+5. [Background and Distributed Runtime](docs/background-and-distributed-runtime.md)
+6. [Testing](docs/testing.md)
+7. [Configuration](docs/configuration.md)
+8. [CLI Reference](docs/cli.md)
+9. [Operations and Tuning](docs/operations-and-tuning.md)
+
+## Install
+
+```bash
+pip install -e ".[dev,http]"
+```
+
+## Minimal Example
 
 ```python
-from pyferox import App, Command, Module, Query, handle, singleton
+from pyferox import App, HTTPAdapter, Module, StructCommand, StructQuery, handle, singleton
 
 
 class UserRepo:
     async def create(self, email: str, name: str) -> int:
         return 1
 
-    async def get(self, user_id: int) -> dict:
-        return {"id": user_id, "email": "test@example.com", "name": "User"}
+    async def get(self, user_id: int) -> dict[str, str]:
+        return {"id": str(user_id), "email": "user@example.com", "name": "User"}
 
 
-class CreateUser(Command):
+class CreateUser(StructCommand):
     email: str
     name: str
 
 
-class GetUser(Query):
+class GetUser(StructQuery):
     user_id: int
 
 
 @handle(CreateUser)
-async def create_user(cmd: CreateUser, users: UserRepo) -> int:
-    return await users.create(cmd.email, cmd.name)
+async def create_user(cmd: CreateUser, users: UserRepo) -> dict[str, int]:
+    return {"id": await users.create(cmd.email, cmd.name)}
 
 
 @handle(GetUser)
-async def get_user(query: GetUser, users: UserRepo) -> dict:
+async def get_user(query: GetUser, users: UserRepo) -> dict[str, str]:
     return await users.get(query.user_id)
 
 
-app = App(
-    modules=[
-        Module(
-            handlers=[create_user, get_user],
-            providers=[singleton(UserRepo())],
-        )
-    ]
-)
-```
-
-Any transport adapter (HTTP, RPC, CLI, worker, queue) can call the same API:
-
-- `await app.execute(command_or_query)`
-- `await app.publish(event)`
-
-## HTTP transport (ASGI)
-
-```python
-from pyferox import HTTPAdapter
-
+app = App(modules=[Module(handlers=[create_user, get_user], providers=[singleton(UserRepo())])])
 http = HTTPAdapter(app)
 http.command("POST", "/users", CreateUser, status_code=201)
 http.query("GET", "/users/{user_id}", GetUser)
 ```
 
-Use with any ASGI server, for example:
+PyFerOx is msgspec-backed. For new transport-facing contracts, prefer `StructCommand` / `StructQuery` / `StructEvent`. Dataclass contracts are still supported, but they are not the primary style to teach in user-facing examples.
+
+Run:
 
 ```bash
-uvicorn your_module:http
+uvicorn app.main:http --reload
 ```
 
-## CLI bootstrap
+Or scaffold first:
 
 ```bash
-pyferox create-project demo_service
-pyferox create-module users --project demo_service/app
+pyferox create-project demo_service --template api
+cd demo_service
 pyferox run-dev --target app.main:http
-```
-
-## Install
-
-```bash
-pip install pyferox
-```
-
-## Development
-
-```bash
-pip install -e ".[dev]"
-pytest
 ```

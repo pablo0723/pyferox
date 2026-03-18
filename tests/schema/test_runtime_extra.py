@@ -6,7 +6,7 @@ from typing import ClassVar
 import msgspec
 import pytest
 
-from pyferox import Command, Query, contract, get_contract_metadata
+from pyferox import Command, Query, StructCommand, StructEvent, StructQuery, contract, get_contract_metadata
 from pyferox.core.errors import ValidationError
 from pyferox.schema import TypedSchema, get_schema_metadata, parse_input, schema_metadata, serialize_output
 from pyferox.schema import runtime as schema_runtime
@@ -230,6 +230,28 @@ def test_contract_schema_skips_classvar_and_validation_hooks_none_paths() -> Non
     assert parsed.value == 1
     schema = schema_runtime._get_contract_schema(Msg)
     assert "marker" not in schema.__struct_fields__
+
+
+def test_framework_owned_struct_contract_bases() -> None:
+    @contract(audience="external")
+    class CreateUser(StructCommand):
+        email: str
+        name: str
+
+    class GetUser(StructQuery):
+        user_id: int
+
+    class UserCreated(StructEvent):
+        user_id: int
+
+    created = parse_input(CreateUser, {"email": "a@example.com", "name": "Ann"})
+    fetched = parse_input(GetUser, {"user_id": "7"})
+    event = parse_input(UserCreated, {"user_id": 3})
+
+    assert isinstance(created, CreateUser)
+    assert isinstance(fetched, GetUser)
+    assert isinstance(event, UserCreated)
+    assert get_contract_metadata(CreateUser)["audience"] == "external"
 
 
 def test_get_contract_schema_for_dataclass_uses_field_default_branch() -> None:

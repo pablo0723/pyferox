@@ -10,6 +10,7 @@ from heapq import heappop, heappush
 from typing import Any, Protocol
 from uuid import uuid4
 
+import msgspec
 from pyferox.core import App, Message
 from pyferox.reliability import (
     IdempotencyStore,
@@ -21,6 +22,10 @@ from pyferox.reliability import (
 
 class Job(Message):
     """Base contract for background jobs."""
+
+
+class StructJob(Job, msgspec.Struct, forbid_unknown_fields=True):
+    """Framework-owned msgspec-backed job base."""
 
 
 @dataclass(slots=True)

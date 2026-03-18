@@ -5,7 +5,17 @@ from pyferox.core.app import App, AppState, LifecycleManager, ProviderRegistry, 
 from pyferox.core.context import ExecutionContext
 
 # Contracts and messaging
-from pyferox.core.messages import Command, Event, Message, Query, contract, get_contract_metadata
+from pyferox.core.messages import (
+    Command,
+    Event,
+    Message,
+    Query,
+    StructCommand,
+    StructEvent,
+    StructQuery,
+    contract,
+    get_contract_metadata,
+)
 from pyferox.core.pagination import ListQuery, PageParams, SortDirection, SortField, build_page_params, parse_sort
 
 # Dispatch, middleware, handlers, DI
@@ -52,6 +62,9 @@ __all__ = [
     "Message",
     "PageParams",
     "Query",
+    "StructCommand",
+    "StructEvent",
+    "StructQuery",
     "SortDirection",
     "SortField",
     "build_page_params",
@@ -97,4 +110,3 @@ __all__ = [
     "normalize_execution_exception",
     "to_payload",
 ]
-

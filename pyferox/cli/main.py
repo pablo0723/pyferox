@@ -150,7 +150,7 @@ def _create_project(name: str, *, template: str = "api") -> None:
         )
     if template == "internal":
         (root / "app" / "services.py").write_text(
-            "from pyferox import Command\n\n\nclass Healthcheck(Command):\n    pass\n",
+            "from pyferox import StructCommand\n\n\nclass Healthcheck(StructCommand):\n    pass\n",
             encoding="utf-8",
         )
     (root / "README.md").write_text(f"# {name}\n\nTemplate: {template}\n", encoding="utf-8")

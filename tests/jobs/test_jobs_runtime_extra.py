@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from pyferox import App, Module, handle
 from pyferox.jobs.runtime import JobEnvelope, _idempotency_ttl
-from pyferox.jobs import InMemoryJobQueue, Job, JobDispatcher, JobStatus, WorkerRuntime
+from pyferox.jobs import InMemoryJobQueue, Job, JobDispatcher, JobStatus, StructJob, WorkerRuntime
 from pyferox.reliability import InMemoryIdempotencyStore, RetryPolicy
 
 
@@ -96,6 +96,28 @@ def test_worker_runtime_lifecycle_and_run_forever() -> None:
 
 def test_idempotency_ttl_helper_invalid_value() -> None:
     assert _idempotency_ttl({"idempotency_ttl_seconds": "bad"}) is None
+
+
+def test_framework_owned_struct_job_base_executes() -> None:
+    class EmailJob(StructJob):
+        address: str
+
+    seen: list[str] = []
+
+    @handle(EmailJob)
+    async def send(job: EmailJob) -> None:
+        seen.append(job.address)
+
+    app = App(modules=[Module(handlers=[send])])
+    dispatcher = JobDispatcher(app)
+
+    async def run() -> JobStatus | None:
+        await dispatcher.enqueue(EmailJob(address="a@example.com"))
+        result = await dispatcher.run_once(timeout=0.1)
+        return result.status if result else None
+
+    assert asyncio.run(run()) == JobStatus.SUCCESS
+    assert seen == ["a@example.com"]
 
 
 def test_job_queue_future_timeout_zero_returns_none() -> None:

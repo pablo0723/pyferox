@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import msgspec
 from types import MappingProxyType
 from typing import Any, ClassVar, Mapping
 
@@ -35,6 +36,18 @@ class Query(Message):
 
 class Event(Message):
     """Base type for domain/integration events."""
+
+
+class StructCommand(Command, msgspec.Struct, forbid_unknown_fields=True):
+    """Framework-owned msgspec-backed command base."""
+
+
+class StructQuery(Query, msgspec.Struct, forbid_unknown_fields=True):
+    """Framework-owned msgspec-backed query base."""
+
+
+class StructEvent(Event, msgspec.Struct, forbid_unknown_fields=True):
+    """Framework-owned msgspec-backed event base."""
 
 
 def contract(**metadata: Any):
