@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 import re
+from secrets import token_hex
 from dataclasses import MISSING, fields, is_dataclass
 from dataclasses import dataclass, field
 from typing import Any, get_args, get_origin, get_type_hints
 from urllib.parse import parse_qs
+
+import msgspec
 
 from pyferox.auth import AuthBackend, PermissionChecker
 from pyferox.core import App, ExecutionContext
@@ -344,11 +347,8 @@ class HTTPAdapter:
             body = await _read_json_body(receive)
             payload = {**query_params, **body, **path_params}
             message = parse_input(route.message_type, payload)
-            context = ExecutionContext(
-                request_id=_header(scope, b"x-request-id") or ExecutionContext().request_id,
-                trace_id=_header(scope, b"x-trace-id"),
-                transport="http",
-            )
+            request_id = _header(scope, b"x-request-id") or token_hex(16)
+            context = ExecutionContext(request_id=request_id, trace_id=_header(scope, b"x-trace-id"), transport="http")
             if self._auth_backend is not None:
                 token = _bearer_token(_header(scope, b"authorization"))
                 if token is None:
@@ -482,7 +482,10 @@ async def _send_json(
     *,
     extra_headers: dict[str, str] | None = None,
 ) -> None:
-    body = json.dumps(payload, default=str).encode("utf-8")
+    try:
+        body = msgspec.json.encode(payload)
+    except Exception:
+        body = json.dumps(payload, default=str).encode("utf-8")
     headers = [(b"content-type", b"application/json")]
     if extra_headers:
         headers.extend((name.lower().encode("utf-8"), value.encode("utf-8")) for name, value in extra_headers.items())
@@ -509,7 +512,10 @@ def _stream_chunk_to_bytes(chunk: Any) -> bytes:
     if isinstance(chunk, str):
         return chunk.encode("utf-8")
     if isinstance(chunk, (dict, list)):
-        return json.dumps(chunk, default=str).encode("utf-8")
+        try:
+            return msgspec.json.encode(chunk)
+        except Exception:
+            return json.dumps(chunk, default=str).encode("utf-8")
     return str(chunk).encode("utf-8")
 
 

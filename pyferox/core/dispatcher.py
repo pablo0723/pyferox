@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Awaitable, Callable, MutableMapping
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, get_type_hints
 
@@ -17,6 +18,13 @@ from pyferox.core.results import to_payload
 Hook = Callable[[ExecutionContext, Any], Awaitable[None]]
 ExceptionHook = Callable[[ExecutionContext, Any, Exception], Awaitable[None]]
 ExceptionMapper = Callable[[Exception], Exception]
+
+
+@dataclass(frozen=True, slots=True)
+class _DependencySpec:
+    name: str
+    dependency_type: type[Any] | None
+    inject_context: bool = False
 
 
 def _identity_exception_mapper(exc: Exception) -> Exception:
@@ -69,6 +77,7 @@ class Dispatcher:
         self.exception_mapper = exception_mapper or _identity_exception_mapper
         self.normalize_results = normalize_results
         self.sync_policy = sync_policy
+        self._invoke_specs_cache: dict[HandlerFn, tuple[_DependencySpec, ...]] = {}
 
     def register_handler(self, message_type: type[Any], handler: HandlerFn) -> None:
         self.registry.register_handler(message_type, handler)
@@ -130,15 +139,33 @@ class Dispatcher:
         scoped_cache: MutableMapping[type[Any], Any],
     ) -> Any:
         kwargs: dict[str, Any] = {}
+        for dependency in self._invoke_specs(fn):
+            if dependency.inject_context:
+                kwargs[dependency.name] = context
+                continue
+            assert dependency.dependency_type is not None
+            kwargs[dependency.name] = self.container.resolve(dependency.dependency_type, scoped_cache)
+
+        result = fn(message, **kwargs)
+        if inspect.isawaitable(result):
+            return await result
+        if self.sync_policy == SyncPolicy.FORBID:
+            raise TypeError(f"Sync handlers are forbidden by dispatcher policy: {fn}")
+        return result
+
+    def _invoke_specs(self, fn: HandlerFn) -> tuple[_DependencySpec, ...]:
+        cached = self._invoke_specs_cache.get(fn)
+        if cached is not None:
+            return cached
+
         signature = inspect.signature(fn)
-        hints = _safe_type_hints(fn)
         params = list(signature.parameters.values())
         if not params:
             raise TypeError(f"Handler must accept at least one argument for message/event: {fn}")
 
-        for index, param in enumerate(params):
-            if index == 0:
-                continue
+        hints = _safe_type_hints(fn)
+        specs: list[_DependencySpec] = []
+        for param in params[1:]:
             annotated_type = hints.get(param.name)
             if annotated_type is None or isinstance(annotated_type, str):
                 if param.default is not inspect.Parameter.empty:
@@ -147,13 +174,10 @@ class Dispatcher:
                     f"Dependency parameter '{param.name}' in {fn} must have a type annotation"
                 )
             if annotated_type is ExecutionContext:
-                kwargs[param.name] = context
+                specs.append(_DependencySpec(name=param.name, dependency_type=None, inject_context=True))
                 continue
-            kwargs[param.name] = self.container.resolve(annotated_type, scoped_cache)
+            specs.append(_DependencySpec(name=param.name, dependency_type=annotated_type))
 
-        result = fn(message, **kwargs)
-        if inspect.isawaitable(result):
-            return await result
-        if self.sync_policy == SyncPolicy.FORBID:
-            raise TypeError(f"Sync handlers are forbidden by dispatcher policy: {fn}")
-        return result
+        resolved_specs = tuple(specs)
+        self._invoke_specs_cache[fn] = resolved_specs
+        return resolved_specs

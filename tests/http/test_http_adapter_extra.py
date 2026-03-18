@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Any
@@ -156,7 +157,7 @@ def test_bearer_token_and_stream_chunk_conversion_helpers() -> None:
     assert _session_token_from_cookie("session=s-1; path=/") == "s-1"
     assert _session_token_from_cookie("foo=bar") is None
     assert _stream_chunk_to_bytes(b"a") == b"a"
-    assert _stream_chunk_to_bytes({"x": 1}) == b'{"x": 1}'
+    assert json.loads(_stream_chunk_to_bytes({"x": 1}).decode("utf-8")) == {"x": 1}
     assert _stream_chunk_to_bytes(7) == b"7"
 
 
@@ -198,7 +199,7 @@ def test_http_adapter_binds_plain_command_contract_and_transport_label() -> None
     start = next(item for item in sent if item["type"] == "http.response.start")
     body = next(item for item in sent if item["type"] == "http.response.body")
     assert start["status"] == 201
-    assert body["body"] == b'{"title": "hello", "transport": "http"}'
+    assert json.loads(body["body"].decode("utf-8")) == {"title": "hello", "transport": "http"}
 
 
 def test_http_adapter_openapi_generation_and_endpoint() -> None:
@@ -235,8 +236,8 @@ def test_http_adapter_openapi_generation_and_endpoint() -> None:
     start = next(item for item in sent if item["type"] == "http.response.start")
     body = next(item for item in sent if item["type"] == "http.response.body")
     assert start["status"] == 200
-    payload = body["body"].decode("utf-8")
-    assert '"title": "Demo API"' in payload
+    payload = json.loads(body["body"].decode("utf-8"))
+    assert payload["info"]["title"] == "Demo API"
 
 
 def test_http_adapter_health_endpoints() -> None:
@@ -373,7 +374,12 @@ def test_http_adapter_list_query_conventions_and_paginated_headers() -> None:
     assert (b"x-total-count", b"1") in start["headers"]
     assert (b"x-page", b"2") in start["headers"]
     assert (b"x-page-size", b"1") in start["headers"]
-    assert body["body"] == b'{"items": [{"id": 1, "name": "A"}], "total": 1, "page": 2, "page_size": 1}'
+    assert json.loads(body["body"].decode("utf-8")) == {
+        "items": [{"id": 1, "name": "A"}],
+        "total": 1,
+        "page": 2,
+        "page_size": 1,
+    }
 
 
 def test_http_adapter_list_query_openapi_baseline() -> None:
