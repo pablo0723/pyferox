@@ -40,7 +40,8 @@ pip install -e ".[dev,http]"
 ## Minimal Example
 
 ```python
-from pyferox import App, HTTPAdapter, Module, StructCommand, StructQuery, handle, singleton
+from pyferox.core import App, Module, StructCommand, StructQuery, handle, singleton
+from pyferox.http import HTTPAdapter
 
 
 class UserRepo:

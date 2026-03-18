@@ -132,6 +132,74 @@ class InMemoryTraceCollector:
         self.spans.append(span)
 
 
+class MetricsCollector(Protocol):
+    def increment(self, name: str, value: float = 1.0, *, tags: dict[str, str] | None = None) -> None:
+        ...
+
+    def observe(self, name: str, value: float, *, tags: dict[str, str] | None = None) -> None:
+        ...
+
+
+@dataclass(slots=True)
+class MetricObservation:
+    name: str
+    value: float
+    tags: dict[str, str] = field(default_factory=dict)
+
+
+class InMemoryMetricsCollector:
+    def __init__(self) -> None:
+        self.counters: dict[tuple[str, tuple[tuple[str, str], ...]], float] = {}
+        self.observations: list[MetricObservation] = []
+
+    def increment(self, name: str, value: float = 1.0, *, tags: dict[str, str] | None = None) -> None:
+        normalized = _metric_tags(tags)
+        key = (name, tuple(sorted(normalized.items())))
+        self.counters[key] = self.counters.get(key, 0.0) + float(value)
+
+    def observe(self, name: str, value: float, *, tags: dict[str, str] | None = None) -> None:
+        self.observations.append(MetricObservation(name=name, value=float(value), tags=_metric_tags(tags)))
+
+    def to_payload(self) -> dict[str, Any]:
+        counters = [
+            {"name": name, "value": value, "tags": dict(tags)}
+            for (name, tags), value in sorted(self.counters.items())
+        ]
+        observations = [
+            {"name": item.name, "value": round(item.value, 3), "tags": item.tags}
+            for item in self.observations[-10:]
+        ]
+        return {
+            "counter_count": len(counters),
+            "observation_count": len(self.observations),
+            "counters": counters,
+            "latest_observations": observations,
+        }
+
+
+class MetricsMiddleware:
+    """Execution middleware producing counters/timing metrics per dispatch."""
+
+    def __init__(self, collector: MetricsCollector, *, metric_prefix: str = "pyferox.dispatch") -> None:
+        self.collector = collector
+        self.metric_prefix = metric_prefix
+
+    async def __call__(self, context: ExecutionContext, message: Any, call_next: Any) -> Any:
+        start = time.perf_counter()
+        tags = {"message": type(message).__name__, "transport": context.transport}
+        self.collector.increment(f"{self.metric_prefix}.total", tags=tags)
+        try:
+            result = await call_next(message)
+            self.collector.increment(f"{self.metric_prefix}.success", tags=tags)
+            return result
+        except Exception:
+            self.collector.increment(f"{self.metric_prefix}.error", tags=tags)
+            raise
+        finally:
+            duration_ms = (time.perf_counter() - start) * 1000.0
+            self.collector.observe(f"{self.metric_prefix}.duration_ms", duration_ms, tags=tags)
+
+
 class TracingMiddleware:
     """Execution middleware producing timing spans for each dispatch."""
 
@@ -175,6 +243,7 @@ async def collect_operational_diagnostics(
     *,
     health_registry: HealthRegistry | None = None,
     trace_collector: InMemoryTraceCollector | None = None,
+    metrics_collector: InMemoryMetricsCollector | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {}
 
@@ -200,5 +269,12 @@ async def collect_operational_diagnostics(
                 "duration_ms": round(spans[-1].duration_ms, 3),
             }
 
+    if metrics_collector is not None:
+        payload["metrics"] = metrics_collector.to_payload()
+
     payload.setdefault("ok", True)
     return payload
+
+
+def _metric_tags(tags: dict[str, str] | None) -> dict[str, str]:
+    return {str(key): str(value) for key, value in (tags or {}).items()}

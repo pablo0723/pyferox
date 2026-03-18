@@ -38,19 +38,64 @@ def test_main_dispatches_create_module(monkeypatch) -> None:
 
 
 def test_main_dispatches_run_dev(monkeypatch) -> None:
-    seen: dict[str, str] = {}
-    monkeypatch.setattr(sys, "argv", ["pyferox", "run-dev", "--target", "demo.main:http"])
-    monkeypatch.setattr(cli_main, "_run_dev", lambda target: seen.setdefault("target", target))
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["pyferox", "run-dev", "--target", "demo.main:http", "--host", "0.0.0.0", "--port", "9000"],
+    )
+    monkeypatch.setattr(
+        cli_main,
+        "_run_dev",
+        lambda target, host="127.0.0.1", port=8000: seen.update({"target": target, "host": host, "port": port}),
+    )
     assert cli_main.main() == 0
-    assert seen["target"] == "demo.main:http"
+    assert seen == {"target": "demo.main:http", "host": "0.0.0.0", "port": 9000}
 
 
 def test_main_dispatches_runserver_alias(monkeypatch) -> None:
-    seen: dict[str, str] = {}
-    monkeypatch.setattr(sys, "argv", ["pyferox", "runserver", "--target", "demo.main:http"])
-    monkeypatch.setattr(cli_main, "_run_dev", lambda target: seen.setdefault("target", target))
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "pyferox",
+            "runserver",
+            "--target",
+            "demo.main:http",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "9100",
+            "--workers",
+            "2",
+            "--reload",
+            "--access-log",
+            "--loop",
+            "asyncio",
+            "--http",
+            "h11",
+            "--log-level",
+            "warning",
+        ],
+    )
+    monkeypatch.setattr(
+        cli_main,
+        "_run_server",
+        lambda target, **kwargs: seen.update({"target": target, **kwargs}),
+    )
     assert cli_main.main() == 0
-    assert seen["target"] == "demo.main:http"
+    assert seen == {
+        "target": "demo.main:http",
+        "host": "0.0.0.0",
+        "port": 9100,
+        "workers": 2,
+        "reload": True,
+        "access_log": True,
+        "loop": "asyncio",
+        "http": "h11",
+        "log_level": "warning",
+    }
 
 
 def test_main_dispatches_inspect_config(monkeypatch) -> None:
@@ -71,17 +116,51 @@ def test_main_returns_non_zero_for_unknown_command(monkeypatch) -> None:
 
 
 def test_run_dev_invokes_uvicorn(monkeypatch) -> None:
-    target_module = types.ModuleType("demo_target")
-    target_module.http = object()
-    calls: list[tuple[object, str, int, bool]] = []
-    uvicorn_module = types.SimpleNamespace(
-        run=lambda app, host, port, reload: calls.append((app, host, port, reload))
-    )
-
-    monkeypatch.setitem(sys.modules, "demo_target", target_module)
+    calls: list[dict[str, object]] = []
+    uvicorn_module = types.SimpleNamespace(run=lambda *args, **kwargs: calls.append({"args": args, "kwargs": kwargs}))
     monkeypatch.setitem(sys.modules, "uvicorn", uvicorn_module)
-    cli_main._run_dev("demo_target:http")
-    assert calls == [(target_module.http, "127.0.0.1", 8000, True)]
+    cli_main._run_dev("demo_target:http", host="0.0.0.0", port=9000)
+    assert len(calls) == 1
+    assert calls[0]["args"] == ("demo_target:http",)
+    assert calls[0]["kwargs"] == {
+        "host": "0.0.0.0",
+        "port": 9000,
+        "reload": True,
+        "workers": 1,
+        "access_log": True,
+        "loop": "auto",
+        "http": "auto",
+        "log_level": "info",
+    }
+
+
+def test_run_server_invokes_uvicorn_with_runtime_flags(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+    uvicorn_module = types.SimpleNamespace(run=lambda *args, **kwargs: calls.append({"args": args, "kwargs": kwargs}))
+    monkeypatch.setitem(sys.modules, "uvicorn", uvicorn_module)
+    cli_main._run_server(
+        "demo_target:http",
+        host="127.0.0.1",
+        port=8010,
+        workers=4,
+        reload=False,
+        access_log=False,
+        loop="uvloop",
+        http="httptools",
+        log_level="warning",
+    )
+    assert len(calls) == 1
+    assert calls[0]["args"] == ("demo_target:http",)
+    assert calls[0]["kwargs"] == {
+        "host": "127.0.0.1",
+        "port": 8010,
+        "reload": False,
+        "workers": 4,
+        "access_log": False,
+        "loop": "uvloop",
+        "http": "httptools",
+        "log_level": "warning",
+    }
 
 
 def test_run_dev_raises_when_uvicorn_missing(monkeypatch) -> None:

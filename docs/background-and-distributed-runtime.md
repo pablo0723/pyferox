@@ -31,7 +31,8 @@ store = InMemoryIdempotencyStore()
 Define a job contract and handler:
 
 ```python
-from pyferox import StructJob, handle
+from pyferox.core import handle
+from pyferox.jobs import StructJob
 
 
 class SendEmail(StructJob):
@@ -46,7 +47,7 @@ async def send_email(job: SendEmail) -> None:
 Create dispatcher and worker:
 
 ```python
-from pyferox import App, Module
+from pyferox.core import App, Module
 from pyferox.jobs import JobDispatcher, LocalJobWorker
 
 app = App(modules=[Module(handlers=[send_email])])

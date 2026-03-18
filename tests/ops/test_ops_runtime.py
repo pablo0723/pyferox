@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 
 import pytest
 
 from pyferox.core import ExecutionContext
-from pyferox.ops import CheckStatus, HealthRegistry, InMemoryTraceCollector, TracingMiddleware, collect_operational_diagnostics
+from pyferox.ops import (
+    CheckStatus,
+    HealthRegistry,
+    InMemoryMetricsCollector,
+    InMemoryTraceCollector,
+    MetricsMiddleware,
+    TracingMiddleware,
+    collect_operational_diagnostics,
+)
 
 
 def test_health_registry_liveness_and_readiness_reports() -> None:
@@ -68,3 +77,44 @@ def test_collect_operational_diagnostics_combines_health_and_trace_data() -> Non
     assert payload["liveness"]["ok"] is True
     assert payload["readiness"]["ok"] is True
     assert payload["traces"]["count"] == 0
+
+
+@dataclass(slots=True)
+class Ping:
+    value: str = "x"
+
+
+def test_metrics_middleware_records_success_and_failure() -> None:
+    collector = InMemoryMetricsCollector()
+    middleware = MetricsMiddleware(collector)
+    context = ExecutionContext(request_id="r1", trace_id="t1", transport="internal")
+
+    async def success(_: object) -> str:
+        return "ok"
+
+    result = asyncio.run(middleware(context, Ping(), success))
+    assert result == "ok"
+
+    async def fail(_: object) -> str:
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError):
+        asyncio.run(middleware(context, Ping(), fail))
+
+    payload = collector.to_payload()
+    counter_names = {item["name"] for item in payload["counters"]}
+    assert "pyferox.dispatch.total" in counter_names
+    assert "pyferox.dispatch.success" in counter_names
+    assert "pyferox.dispatch.error" in counter_names
+    assert payload["observation_count"] >= 2
+
+
+def test_collect_operational_diagnostics_includes_metrics_summary() -> None:
+    metrics = InMemoryMetricsCollector()
+    metrics.increment("pyferox.dispatch.total", tags={"transport": "http"})
+    metrics.observe("pyferox.dispatch.duration_ms", 1.23, tags={"transport": "http"})
+
+    payload = asyncio.run(collect_operational_diagnostics(metrics_collector=metrics))
+    assert payload["ok"] is True
+    assert payload["metrics"]["counter_count"] == 1
+    assert payload["metrics"]["observation_count"] == 1

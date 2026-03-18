@@ -80,13 +80,14 @@ class RPCServer:
                     error={"type": "idempotency_conflict", "error": "Idempotency key is already in progress"},
                 )
 
+        context: ExecutionContext | None = None
         try:
-            message = parse_input(message_type, request.payload)
             context = ExecutionContext(
                 request_id=str(request.metadata.get("request_id", ExecutionContext().request_id)),
                 trace_id=_to_optional_str(request.metadata.get("trace_id")),
                 transport="rpc",
             )
+            message = parse_input(message_type, request.payload)
             result = await self.app.execute_with_context(message, context=context)
             if self._idempotency_store is not None and request.idempotency_key is not None:
                 await self._idempotency_store.complete(request.idempotency_key, result=result)
@@ -95,6 +96,8 @@ class RPCServer:
             if self._idempotency_store is not None and request.idempotency_key is not None:
                 await self._idempotency_store.fail(request.idempotency_key, error=str(exc))
             status, payload = map_exception_to_transport(exc)
+            if context is not None:
+                payload.setdefault("request_id", context.request_id)
             return RPCResponse(ok=False, status_code=status, error=payload)
 
 

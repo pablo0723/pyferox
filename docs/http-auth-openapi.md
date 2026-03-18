@@ -51,7 +51,7 @@ Response headers for paginated responses:
 Return `Streamed` from handlers:
 
 ```python
-from pyferox import Streamed
+from pyferox.core import Streamed
 
 
 @handle(DownloadReport)
@@ -82,7 +82,7 @@ http.query("GET", "/admin", AdminQuery, permission="admin:read")
 Or on handler via decorator:
 
 ```python
-from pyferox import requires
+from pyferox.auth import requires
 
 
 @handle(AdminQuery)
@@ -119,7 +119,7 @@ http.command(
 Contract metadata support:
 
 ```python
-from pyferox import StructCommand
+from pyferox.core import StructCommand
 from pyferox.schema import schema_metadata
 
 

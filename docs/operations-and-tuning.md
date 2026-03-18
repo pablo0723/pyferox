@@ -50,10 +50,15 @@ if not report.ok:
 Collect broader diagnostics:
 
 ```python
-from pyferox.ops import InMemoryTraceCollector, collect_operational_diagnostics
+from pyferox.ops import InMemoryMetricsCollector, InMemoryTraceCollector, collect_operational_diagnostics
 
-collector = InMemoryTraceCollector()
-payload = await collect_operational_diagnostics(health_registry=health, trace_collector=collector)
+trace_collector = InMemoryTraceCollector()
+metrics_collector = InMemoryMetricsCollector()
+payload = await collect_operational_diagnostics(
+    health_registry=health,
+    trace_collector=trace_collector,
+    metrics_collector=metrics_collector,
+)
 ```
 
 Expose via CLI:
@@ -126,6 +131,36 @@ Guidelines:
 - set conservative `max_page_size` defaults
 - require explicit permissions on sensitive routes
 - propagate request IDs (`x-request-id`, `x-trace-id`) through clients
+
+## Metrics Middleware
+
+Capture dispatch counters and latency:
+
+```python
+from pyferox.ops import InMemoryMetricsCollector, MetricsMiddleware
+
+metrics = InMemoryMetricsCollector()
+app.add_middleware(MetricsMiddleware(metrics))
+```
+
+Default metric names:
+
+- `pyferox.dispatch.total`
+- `pyferox.dispatch.success`
+- `pyferox.dispatch.error`
+- `pyferox.dispatch.duration_ms`
+
+See [Observability](observability.md) for the full model.
+
+## Benchmark Baselines
+
+Run baseline benchmark suite:
+
+```bash
+python benchmarks/phase4_baseline.py
+```
+
+This measures startup time, dispatch throughput, and in-process HTTP adapter throughput.
 
 ## Database Tuning
 

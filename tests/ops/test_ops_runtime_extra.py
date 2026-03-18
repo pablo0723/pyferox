@@ -3,7 +3,14 @@ from __future__ import annotations
 import asyncio
 
 from pyferox.core import ExecutionContext
-from pyferox.ops import HealthRegistry, InMemoryTraceCollector, TracingMiddleware, collect_operational_diagnostics
+from pyferox.ops import (
+    HealthRegistry,
+    InMemoryMetricsCollector,
+    InMemoryTraceCollector,
+    MetricsMiddleware,
+    TracingMiddleware,
+    collect_operational_diagnostics,
+)
 
 
 def test_health_registry_async_exception_and_unsupported_result_branches() -> None:
@@ -49,3 +56,22 @@ def test_collect_operational_diagnostics_trace_only_and_latest_trace() -> None:
     assert payload["ok"] is True
     assert payload["traces"]["count"] == 1
     assert payload["latest_trace"]["success"] is True
+
+
+def test_metrics_collector_normalizes_tags_and_middleware_prefix() -> None:
+    collector = InMemoryMetricsCollector()
+    middleware = MetricsMiddleware(collector, metric_prefix="custom.dispatch")
+    context = ExecutionContext(transport="rpc")
+
+    async def call_next(_: object) -> str:
+        return "ok"
+
+    asyncio.run(middleware(context, object(), call_next))
+    collector.increment("custom.counter", tags={"attempt": 1})  # type: ignore[arg-type]
+    collector.observe("custom.observe", 2, tags={"ok": True})  # type: ignore[arg-type]
+
+    payload = asyncio.run(collect_operational_diagnostics(metrics_collector=collector))
+    assert payload["metrics"]["counter_count"] >= 2
+    names = {item["name"] for item in payload["metrics"]["counters"]}
+    assert "custom.dispatch.total" in names
+    assert "custom.dispatch.success" in names

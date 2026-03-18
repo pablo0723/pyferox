@@ -37,7 +37,7 @@ Returned payload:
 Use context manager `override_dependencies`:
 
 ```python
-from pyferox import provider
+from pyferox.core import provider
 from pyferox.testing import override_dependencies
 
 with override_dependencies(app, provider(UserRepo, lambda: FakeUserRepo())):

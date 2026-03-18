@@ -138,3 +138,26 @@ def test_rpc_transport_uses_request_timeout_when_provided() -> None:
     )
     assert response.ok is True
     assert response.data == {"value": "ok"}
+
+
+def test_rpc_error_payload_includes_request_id_from_metadata() -> None:
+    @handle(Msg)
+    async def echo(cmd: Msg) -> dict[str, str]:
+        return {"value": cmd.value}
+
+    app = App(modules=[Module(handlers=[echo])])
+    server = RPCServer(app)
+    server.register("echo", Msg)
+
+    response = asyncio.run(
+        server.handle(
+            RPCRequest(
+                method="echo",
+                payload={},
+                metadata={"request_id": "rpc-req-1"},
+            )
+        )
+    )
+    assert response.ok is False
+    assert response.error is not None
+    assert response.error.get("request_id") == "rpc-req-1"

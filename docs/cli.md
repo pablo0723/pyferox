@@ -29,10 +29,17 @@ Run dev server:
 
 ```bash
 pyferox run-dev --target app.main:http
-pyferox runserver --target app.main:http
+pyferox run-dev --target app.main:http --host 127.0.0.1 --port 8000
 ```
 
 `--target` format: `<module_path>:<object_name>`
+
+Run production-style server:
+
+```bash
+pyferox runserver --target app.main:http --workers 2 --no-access-log
+pyferox runserver --target app.main:http --loop uvloop --http httptools --log-level warning
+```
 
 ## Config
 

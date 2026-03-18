@@ -28,9 +28,19 @@ def main() -> int:
 
     run_dev = sub.add_parser("run-dev")
     run_dev.add_argument("--target", default="app.main:http")
+    run_dev.add_argument("--host", default="127.0.0.1")
+    run_dev.add_argument("--port", type=int, default=8000)
 
     run_server = sub.add_parser("runserver")
     run_server.add_argument("--target", default="app.main:http")
+    run_server.add_argument("--host", default="127.0.0.1")
+    run_server.add_argument("--port", type=int, default=8000)
+    run_server.add_argument("--workers", type=int, default=1)
+    run_server.add_argument("--reload", action="store_true")
+    run_server.add_argument("--access-log", action=argparse.BooleanOptionalAction, default=False)
+    run_server.add_argument("--loop", choices=["auto", "asyncio", "uvloop"], default="auto")
+    run_server.add_argument("--http", choices=["auto", "h11", "httptools"], default="auto")
+    run_server.add_argument("--log-level", default="info")
 
     inspect_config = sub.add_parser("inspect-config")
     inspect_config.add_argument("--profile", choices=["dev", "test", "prod"], default=None)
@@ -85,10 +95,20 @@ def main() -> int:
         _create_module(args.project, args.name)
         return 0
     if args.command == "run-dev":
-        _run_dev(args.target)
+        _run_dev(args.target, host=args.host, port=args.port)
         return 0
     if args.command == "runserver":
-        _run_dev(args.target)
+        _run_server(
+            args.target,
+            host=args.host,
+            port=args.port,
+            workers=args.workers,
+            reload=args.reload,
+            access_log=bool(args.access_log),
+            loop=args.loop,
+            http=args.http,
+            log_level=args.log_level,
+        )
         return 0
     if args.command == "inspect-config":
         _inspect_config(profile=args.profile)
@@ -202,7 +222,7 @@ PYFEROX_DB_ECHO=false
     )
     if template == "api":
         (root / "app" / "main.py").write_text(
-            """from pyferox import App
+            """from pyferox.core import App
 from pyferox.http import HTTPAdapter
 
 from app.config import config
@@ -216,7 +236,8 @@ http.enable_openapi(path="/openapi.json", title=config.app_name, version="0.1.0"
             encoding="utf-8",
         )
         (root / "app" / "routes.py").write_text(
-            """from pyferox import HTTPAdapter, Module, StructQuery, handle
+            """from pyferox.core import Module, StructQuery, handle
+from pyferox.http import HTTPAdapter
 
 
 class Ping(StructQuery):
@@ -239,7 +260,7 @@ def register_routes(http: HTTPAdapter) -> None:
         )
     if template == "internal":
         (root / "app" / "main.py").write_text(
-            """from pyferox import App
+            """from pyferox.core import App
 from pyferox.http import HTTPAdapter
 
 from app.config import config
@@ -252,7 +273,7 @@ http.enable_openapi(path="/openapi.json", title=config.app_name, version="0.1.0"
             encoding="utf-8",
         )
         (root / "app" / "services.py").write_text(
-            """from pyferox import Module, StructCommand
+            """from pyferox.core import Module, StructCommand
 
 
 class Healthcheck(StructCommand):
@@ -299,21 +320,78 @@ def _create_module(project: str, name: str) -> None:
     module_dir.mkdir(parents=True, exist_ok=True)
     (module_dir / "__init__.py").write_text("", encoding="utf-8")
     (module_dir / "module.py").write_text(
-        "from pyferox import Module\n\nmodule = Module(name='" + name + "')\n",
+        "from pyferox.core import Module\n\nmodule = Module(name='" + name + "')\n",
         encoding="utf-8",
     )
 
 
-def _run_dev(target: str) -> None:
+def _run_dev(target: str, *, host: str = "127.0.0.1", port: int = 8000) -> None:
+    _run_uvicorn(
+        target=target,
+        host=host,
+        port=port,
+        workers=1,
+        reload=True,
+        access_log=True,
+        loop="auto",
+        http="auto",
+        log_level="info",
+    )
+
+
+def _run_server(
+    target: str,
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8000,
+    workers: int = 1,
+    reload: bool = False,
+    access_log: bool = False,
+    loop: str = "auto",
+    http: str = "auto",
+    log_level: str = "info",
+) -> None:
+    _run_uvicorn(
+        target=target,
+        host=host,
+        port=port,
+        workers=max(1, workers),
+        reload=reload,
+        access_log=access_log,
+        loop=loop,
+        http=http,
+        log_level=log_level,
+    )
+
+
+def _run_uvicorn(
+    *,
+    target: str,
+    host: str,
+    port: int,
+    workers: int,
+    reload: bool,
+    access_log: bool,
+    loop: str,
+    http: str,
+    log_level: str,
+) -> None:
     try:
         import uvicorn
     except Exception as exc:  # pragma: no cover - optional runtime
-        raise RuntimeError("uvicorn is required for run-dev") from exc
+        raise RuntimeError("uvicorn is required for run-dev/runserver") from exc
 
-    module_name, obj_name = target.split(":", 1)
-    module = importlib.import_module(module_name)
-    app = getattr(module, obj_name)
-    uvicorn.run(app, host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run(
+        target,
+        host=host,
+        port=port,
+        reload=reload,
+        workers=workers,
+        access_log=access_log,
+        loop=loop,
+        http=http,
+        log_level=log_level,
+    )
 
 
 def _import_target(target: str) -> object:

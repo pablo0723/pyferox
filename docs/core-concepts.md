@@ -2,15 +2,7 @@
 
 ## Import Strategy
 
-PyFerOx supports two styles.
-
-Top-level ergonomic imports:
-
-```python
-from pyferox import App, Module, Command, Query, handle, provider, singleton
-```
-
-Namespace imports when you want clearer boundaries:
+Use explicit module imports to keep boundaries clear:
 
 ```python
 from pyferox.core import App, Module, Command, Query, handle
@@ -79,7 +71,7 @@ To keep the public API framework-shaped, PyFerOx provides framework-owned msgspe
 Recommended style for new code is msgspec-backed contracts:
 
 ```python
-from pyferox import StructCommand, StructQuery
+from pyferox.core import StructCommand, StructQuery
 
 
 class CreateUser(StructCommand):
@@ -96,7 +88,7 @@ This gives you direct construction plus fast msgspec-based parsing/serialization
 Use `@contract(...)` metadata if needed:
 
 ```python
-from pyferox import StructQuery, contract
+from pyferox.core import StructQuery, contract
 
 
 @contract(audience="internal", version=1)
@@ -144,7 +136,7 @@ Injected dependencies are resolved from handler parameter type annotations.
 You can inject it into handlers:
 
 ```python
-from pyferox import ExecutionContext
+from pyferox.core import ExecutionContext
 
 
 @handle(GetUser)

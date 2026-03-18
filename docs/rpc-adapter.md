@@ -26,7 +26,7 @@ PyFerOx RPC is built from three parts:
 Server side:
 
 ```python
-from pyferox import App, Module, StructQuery, handle
+from pyferox.core import App, Module, StructQuery, handle
 from pyferox.rpc import RPCServer, InMemoryRPCTransport
 from pyferox.reliability import InMemoryIdempotencyStore
 

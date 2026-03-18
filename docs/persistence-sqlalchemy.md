@@ -13,7 +13,7 @@ PyFerOx does not replace SQLAlchemy. It provides:
 ## Configure Database Module
 
 ```python
-from pyferox import App, Module
+from pyferox.core import App, Module
 from pyferox.db import SQLAlchemySettings, sqlalchemy_module
 
 db_module = sqlalchemy_module(
@@ -35,7 +35,7 @@ Engine is disposed on app shutdown hook.
 
 ```python
 from sqlalchemy import select
-from pyferox import StructCommand, Query, handle
+from pyferox.core import Query, StructCommand, handle
 from pyferox.db import UnitOfWork
 
 
