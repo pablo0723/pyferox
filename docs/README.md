@@ -10,11 +10,12 @@ If you are new to the framework:
 2. [Core Concepts](core-concepts.md)
 3. [HTTP, Auth, OpenAPI](http-auth-openapi.md)
 4. [Persistence (SQLAlchemy)](persistence-sqlalchemy.md)
-5. [Background and Distributed Runtime](background-and-distributed-runtime.md)
-6. [Testing](testing.md)
-7. [Configuration](configuration.md)
-8. [CLI Reference](cli.md)
-9. [Operations and Tuning](operations-and-tuning.md)
+5. [RPC Adapter](rpc-adapter.md)
+6. [Background and Distributed Runtime](background-and-distributed-runtime.md)
+7. [Testing](testing.md)
+8. [Configuration](configuration.md)
+9. [CLI Reference](cli.md)
+10. [Operations and Tuning](operations-and-tuning.md)
 
 ## Phase Audit References
 
@@ -27,6 +28,7 @@ If you are new to the framework:
 - Build your first module and handlers: [Quickstart](quickstart.md)
 - Learn composition and DI: [Core Concepts](core-concepts.md)
 - Expose API and secure routes: [HTTP, Auth, OpenAPI](http-auth-openapi.md)
+- Build service-to-service RPC: [RPC Adapter](rpc-adapter.md)
 - Add data layer and migrations: [Persistence (SQLAlchemy)](persistence-sqlalchemy.md)
 - Add workers/scheduler/RPC/events/workflows: [Background and Distributed Runtime](background-and-distributed-runtime.md)
 - Harden tests and operations: [Testing](testing.md), [Operations and Tuning](operations-and-tuning.md)

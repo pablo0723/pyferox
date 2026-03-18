@@ -104,6 +104,8 @@ await bus.run_once(timeout=0.5)
 
 ## RPC
 
+For a dedicated transport/adapter guide, see [RPC Adapter](rpc-adapter.md).
+
 Server side:
 
 ```python

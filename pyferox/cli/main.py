@@ -131,29 +131,167 @@ def main() -> int:
 
 def _create_project(name: str, *, template: str = "api") -> None:
     root = Path(name)
+    project_name = root.name
     root.mkdir(parents=True, exist_ok=True)
     (root / "app").mkdir(exist_ok=True)
     (root / "app" / "__init__.py").write_text("", encoding="utf-8")
     (root / "app" / "config.py").write_text(
-        "from pyferox.config import load_config\n\nconfig = load_config()\n",
+        '''"""Project configuration entrypoint."""
+
+from __future__ import annotations
+
+from pyferox.config import AppConfig, load_config
+
+
+def get_config(profile: str | None = None) -> AppConfig:
+    # Profile precedence:
+    # 1) explicit `profile` argument
+    # 2) PYFEROX_PROFILE from environment / .env files
+    # 3) framework default profile
+    return load_config(profile=profile)
+
+
+config = get_config()
+''',
         encoding="utf-8",
     )
-    (root / "app" / "main.py").write_text(
-        "from pyferox import App\nfrom pyferox.http import HTTPAdapter\n\nfrom app.config import config\n\napp = App()\nhttp = HTTPAdapter(app)\n",
+    (root / ".env").write_text(
+        f"""# Base environment (shared defaults for all profiles)
+# Active profile: dev | test | prod
+PYFEROX_PROFILE=dev
+
+# Logical service name used by diagnostics and docs metadata
+PYFEROX_APP_NAME={project_name}
+
+# Default HTTP settings
+PYFEROX_HTTP_HOST=127.0.0.1
+PYFEROX_HTTP_PORT=8000
+PYFEROX_HTTP_DEBUG=true
+
+# Database URL (edit for your storage engine)
+# PYFEROX_DB_URL=sqlite+aiosqlite:///./app.db
+
+# Secret key (set this in production through env/secrets manager)
+# PYFEROX_SECRET_KEY=change-me
+""",
         encoding="utf-8",
     )
-    (root / ".env").write_text("PYFEROX_PROFILE=dev\n", encoding="utf-8")
+    (root / ".env.dev").write_text(
+        """# Development overrides
+PYFEROX_PROFILE=dev
+PYFEROX_HTTP_DEBUG=true
+PYFEROX_DB_ECHO=true
+""",
+        encoding="utf-8",
+    )
+    (root / ".env.test").write_text(
+        """# Test profile overrides
+PYFEROX_PROFILE=test
+PYFEROX_HTTP_DEBUG=true
+PYFEROX_DB_ECHO=false
+""",
+        encoding="utf-8",
+    )
+    (root / ".env.prod").write_text(
+        """# Production profile overrides
+PYFEROX_PROFILE=prod
+PYFEROX_HTTP_DEBUG=false
+PYFEROX_DB_ECHO=false
+""",
+        encoding="utf-8",
+    )
     if template == "api":
+        (root / "app" / "main.py").write_text(
+            """from pyferox import App
+from pyferox.http import HTTPAdapter
+
+from app.config import config
+from app.routes import api_module, register_routes
+
+app = App(modules=[api_module])
+http = HTTPAdapter(app)
+register_routes(http)
+http.enable_openapi(path="/openapi.json", title=config.app_name, version="0.1.0")
+""",
+            encoding="utf-8",
+        )
         (root / "app" / "routes.py").write_text(
-            "from pyferox import HTTPAdapter\n\n\ndef register_routes(http: HTTPAdapter) -> None:\n    pass\n",
+            """from pyferox import HTTPAdapter, Module, StructQuery, handle
+
+
+class Ping(StructQuery):
+    pass
+
+
+@handle(Ping)
+async def ping(_: Ping) -> dict[str, bool]:
+    return {"ok": True}
+
+
+api_module = Module(name="api", handlers=[ping])
+
+
+def register_routes(http: HTTPAdapter) -> None:
+    # Add command/query bindings here.
+    http.query("GET", "/ping", Ping)
+""",
             encoding="utf-8",
         )
     if template == "internal":
-        (root / "app" / "services.py").write_text(
-            "from pyferox import StructCommand\n\n\nclass Healthcheck(StructCommand):\n    pass\n",
+        (root / "app" / "main.py").write_text(
+            """from pyferox import App
+from pyferox.http import HTTPAdapter
+
+from app.config import config
+from app.services import internal_module
+
+app = App(modules=[internal_module])
+http = HTTPAdapter(app)
+http.enable_openapi(path="/openapi.json", title=config.app_name, version="0.1.0")
+""",
             encoding="utf-8",
         )
-    (root / "README.md").write_text(f"# {name}\n\nTemplate: {template}\n", encoding="utf-8")
+        (root / "app" / "services.py").write_text(
+            """from pyferox import Module, StructCommand
+
+
+class Healthcheck(StructCommand):
+    pass
+
+
+# Register internal handlers/providers inside this module.
+internal_module = Module(name="internal")
+""",
+            encoding="utf-8",
+        )
+    (root / "README.md").write_text(
+        f"""# {project_name}
+
+Template: {template}
+
+## Development
+
+Run local server:
+
+```bash
+pyferox runserver --target app.main:http
+```
+
+Inspect resolved configuration:
+
+```bash
+pyferox inspect-config
+pyferox inspect-config --profile prod
+```
+
+## Configuration Notes
+
+- Keep shared defaults in `.env`.
+- Put profile-specific overrides in `.env.dev`, `.env.test`, `.env.prod`.
+- Production secrets should come from environment variables or secret providers.
+""",
+        encoding="utf-8",
+    )
 
 
 def _create_module(project: str, name: str) -> None:

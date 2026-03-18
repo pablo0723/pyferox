@@ -11,6 +11,12 @@ pyferox create-project my_service --template api
 pyferox create-project my_internal --template internal
 ```
 
+`create-project` now generates a richer starter layout:
+
+- `app/config.py` with typed config loader helper
+- `.env`, `.env.dev`, `.env.test`, `.env.prod` with commented configuration examples
+- template-specific starter modules (`app/routes.py` or `app/services.py`)
+
 Create module:
 
 ```bash
