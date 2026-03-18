@@ -117,6 +117,7 @@ class HTTPAdapter:
             context = ExecutionContext(
                 request_id=_header(scope, b"x-request-id") or ExecutionContext().request_id,
                 trace_id=_header(scope, b"x-trace-id"),
+                transport="http",
             )
             if self._auth_backend is not None:
                 token = _bearer_token(_header(scope, b"authorization"))

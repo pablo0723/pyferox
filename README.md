@@ -7,7 +7,7 @@ Applications are built around commands, queries, events, services, and repositor
 
 ## Current phase
 
-Phase 1 foundation is implemented:
+Phase 1 foundation baseline is implemented (see `phase1_audit.md` for done/partial/missing details):
 
 - Application kernel + lifecycle hooks (`startup` / `shutdown` / `lifespan`)
 - Module system with imports and lifecycle hooks
@@ -24,13 +24,13 @@ Phase 1 foundation is implemented:
 - Basic auth contracts (`Identity`, `Principal`, `AuthBackend`, `PermissionChecker`)
 - HTTP adapter (`HTTPAdapter`) with typed route-to-message mapping, auth/permission checks, streamed responses
 - SQLAlchemy integration (`sqlalchemy_module`, `UnitOfWork`, `Repository`)
-- CLI bootstrap (`pyferox create-project`, `create-module`, `run-dev`)
+- CLI bootstrap (`pyferox create-project`, `create-module`, `run-dev`, `inspect-config`)
 - Testing utilities (`create_test_app`, `TestHTTPClient`, `FakeDispatcher`)
 
 ## Quickstart
 
 ```python
-from pyferox import App, Command, Module, Query, SchemaModel, handle, singleton
+from pyferox import App, Command, Module, Query, handle, singleton
 
 
 class UserRepo:
@@ -41,12 +41,12 @@ class UserRepo:
         return {"id": user_id, "email": "test@example.com", "name": "User"}
 
 
-class CreateUser(Command, SchemaModel):
+class CreateUser(Command):
     email: str
     name: str
 
 
-class GetUser(Query, SchemaModel):
+class GetUser(Query):
     user_id: int
 
 

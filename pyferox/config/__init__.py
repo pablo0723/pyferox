@@ -9,8 +9,10 @@ from pyferox.config.settings import (
     EnvSecretProvider,
     FileSecretProvider,
     HttpConfig,
+    ModuleConfig,
     SecretProvider,
     load_env_file,
+    load_module_config,
     load_config,
 )
 
@@ -23,7 +25,9 @@ __all__ = [
     "EnvSecretProvider",
     "FileSecretProvider",
     "HttpConfig",
+    "ModuleConfig",
     "SecretProvider",
     "load_env_file",
+    "load_module_config",
     "load_config",
 ]

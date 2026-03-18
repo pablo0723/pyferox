@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, MutableMapping
 from enum import StrEnum
 from typing import Any, get_type_hints
 
@@ -12,8 +12,15 @@ from pyferox.core.di import Container, ResolutionError
 from pyferox.core.errors import HandlerNotFoundError
 from pyferox.core.handlers import HandlerFn, HandlerRegistry
 from pyferox.core.middleware import Middleware, compose_middlewares
+from pyferox.core.results import to_payload
 
 Hook = Callable[[ExecutionContext, Any], Awaitable[None]]
+ExceptionHook = Callable[[ExecutionContext, Any, Exception], Awaitable[None]]
+ExceptionMapper = Callable[[Exception], Exception]
+
+
+def _identity_exception_mapper(exc: Exception) -> Exception:
+    return exc
 
 
 class SyncPolicy(StrEnum):
@@ -30,6 +37,9 @@ class Dispatcher:
         middlewares: list[Middleware] | None = None,
         pre_hooks: list[Hook] | None = None,
         post_hooks: list[Hook] | None = None,
+        exception_hooks: list[ExceptionHook] | None = None,
+        exception_mapper: ExceptionMapper | None = None,
+        normalize_results: bool = True,
         sync_policy: SyncPolicy = SyncPolicy.ALLOW,
     ) -> None:
         self.registry = registry
@@ -37,6 +47,9 @@ class Dispatcher:
         self.middlewares = middlewares if middlewares is not None else []
         self.pre_hooks = pre_hooks if pre_hooks is not None else []
         self.post_hooks = post_hooks if post_hooks is not None else []
+        self.exception_hooks = exception_hooks if exception_hooks is not None else []
+        self.exception_mapper = exception_mapper or _identity_exception_mapper
+        self.normalize_results = normalize_results
         self.sync_policy = sync_policy
 
     def register_handler(self, message_type: type[Any], handler: HandlerFn) -> None:
@@ -57,12 +70,15 @@ class Dispatcher:
     def add_post_hook(self, hook: Hook) -> None:
         self.post_hooks.append(hook)
 
+    def add_exception_hook(self, hook: ExceptionHook) -> None:
+        self.exception_hooks.append(hook)
+
     async def dispatch(
         self,
         message: Any,
         *,
         context: ExecutionContext,
-        scoped_cache: dict[type[Any], Any],
+        scoped_cache: MutableMapping[type[Any], Any],
     ) -> Any:
         handler = self.registry.get_handler(type(message))
         if handler is None:
@@ -75,7 +91,15 @@ class Dispatcher:
             return await self._invoke(handler, msg, context, scoped_cache)
         call_next = compose_middlewares(middlewares=self.middlewares, context=context, terminal=invoke)
         try:
-            return await call_next(message)
+            result = await call_next(message)
+            return to_payload(result) if self.normalize_results else result
+        except Exception as exc:
+            for hook in self.exception_hooks:
+                await hook(context, message, exc)
+            mapped = self.exception_mapper(exc)
+            if mapped is exc:
+                raise
+            raise mapped from exc
         finally:
             for hook in self.post_hooks:
                 await hook(context, message)
@@ -85,7 +109,7 @@ class Dispatcher:
         fn: HandlerFn,
         message: Any,
         context: ExecutionContext,
-        scoped_cache: dict[type[Any], Any],
+        scoped_cache: MutableMapping[type[Any], Any],
     ) -> Any:
         kwargs: dict[str, Any] = {}
         signature = inspect.signature(fn)

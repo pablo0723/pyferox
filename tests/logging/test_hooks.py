@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 
 import pytest
 
+from pyferox import App, Command, Module, handle
 from pyferox.core import ExecutionContext
-from pyferox.logging import RequestLoggingMiddleware, get_logger
+from pyferox.logging import RequestLoggingMiddleware, get_logger, install_logging_hooks
 
 
 def test_get_logger_reuses_existing_handler() -> None:
@@ -25,11 +27,11 @@ class CaptureLogger:
         self.info_calls: list[tuple[str, dict[str, object]]] = []
         self.exception_calls: list[tuple[str, dict[str, object]]] = []
 
-    def info(self, message: str, *, extra: dict[str, object]) -> None:
-        self.info_calls.append((message, extra))
+    def info(self, message: str, *, extra: dict[str, object] | None = None) -> None:
+        self.info_calls.append((message, extra or {}))
 
-    def exception(self, message: str, *, extra: dict[str, object]) -> None:
-        self.exception_calls.append((message, extra))
+    def exception(self, message: str, *, extra: dict[str, object] | None = None) -> None:
+        self.exception_calls.append((message, extra or {}))
 
 
 def test_request_logging_middleware_logs_success() -> None:
@@ -58,3 +60,27 @@ def test_request_logging_middleware_logs_exception() -> None:
         asyncio.run(middleware(context, object(), call_next))
     assert [entry[0] for entry in capture.info_calls] == ["request.start"]
     assert [entry[0] for entry in capture.exception_calls] == ["request.error"]
+
+
+@dataclass(slots=True)
+class Crash(Command):
+    value: str
+
+
+@handle(Crash)
+async def crash_handler(cmd: Crash) -> str:
+    raise ValueError("boom")
+
+
+def test_install_logging_hooks_adds_lifecycle_and_exception_logging() -> None:
+    capture = CaptureLogger()
+    app = App(modules=[Module(handlers=[crash_handler])])
+    install_logging_hooks(app, logger=capture, include_request_middleware=False)  # type: ignore[arg-type]
+
+    asyncio.run(app.startup())
+    with pytest.raises(ValueError):
+        asyncio.run(app.execute(Crash(value="x")))
+    asyncio.run(app.shutdown())
+
+    assert [entry[0] for entry in capture.info_calls] == ["app.startup", "app.shutdown"]
+    assert [entry[0] for entry in capture.exception_calls] == ["dispatch.error"]

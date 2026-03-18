@@ -51,3 +51,16 @@ class HandlerRegistry:
     def get_listeners(self, event_type: type[Any]) -> list[HandlerFn]:
         return list(self.event_listeners.get(event_type, []))
 
+    def list_handlers(self) -> dict[type[Any], HandlerFn]:
+        return dict(self.message_handlers)
+
+    def list_listeners(self) -> dict[type[Any], list[HandlerFn]]:
+        return {event_type: list(listeners) for event_type, listeners in self.event_listeners.items()}
+
+    def describe(self) -> dict[str, dict[str, list[str] | str]]:
+        handlers = {message_type.__name__: fn.__name__ for message_type, fn in self.message_handlers.items()}
+        listeners = {
+            event_type.__name__: [fn.__name__ for fn in event_listeners]
+            for event_type, event_listeners in self.event_listeners.items()
+        }
+        return {"handlers": handlers, "listeners": listeners}

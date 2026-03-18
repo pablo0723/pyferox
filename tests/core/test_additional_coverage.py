@@ -7,9 +7,11 @@ import pytest
 
 from pyferox.core import (
     App,
+    AppState,
     Command,
     Event,
     HandlerNotFoundError,
+    LifecycleManager,
     SyncPolicy,
     handle,
     map_exception_to_transport,
@@ -17,7 +19,7 @@ from pyferox.core import (
 from pyferox.core.context import ExecutionContext
 from pyferox.core.di import Container, Provider, ResolutionError, Scope, provider
 from pyferox.core.dispatcher import Dispatcher
-from pyferox.core.errors import PyFerOxError
+from pyferox.core.errors import InfrastructureError, PermissionDeniedError, PyFerOxError, UnauthorizedError
 from pyferox.core.handlers import HandlerRegistry
 from pyferox.core.module import Module as RawModule, as_module
 from pyferox.core.results import Streamed, Success, to_payload
@@ -220,3 +222,162 @@ def test_exception_mapping_for_framework_error_branches() -> None:
     status, payload = map_exception_to_transport(PyFerOxError("boom"))
     assert status == 500
     assert payload["type"] == "framework_error"
+
+    status, payload = map_exception_to_transport(UnauthorizedError("login required"))
+    assert status == 401
+    assert payload["type"] == "unauthorized"
+
+    status, payload = map_exception_to_transport(PermissionDeniedError("forbidden"))
+    assert status == 403
+    assert payload["type"] == "permission_denied"
+
+    status, payload = map_exception_to_transport(InfrastructureError("db down"))
+    assert status == 500
+    assert payload["type"] == "infrastructure_error"
+
+
+def test_handler_registry_introspection_helpers() -> None:
+    registry = HandlerRegistry()
+
+    @handle(Ping)
+    async def ping_handler(message: Ping) -> str:
+        return message.value
+
+    @handle(Event)
+    async def event_handler(event: Event) -> None:
+        return None
+
+    registry.register_handler(Ping, ping_handler)
+    registry.register_listener(Event, event_handler)
+
+    assert registry.list_handlers()[Ping] is ping_handler
+    assert registry.list_listeners()[Event] == [event_handler]
+    description = registry.describe()
+    assert description["handlers"]["Ping"] == "ping_handler"
+    assert description["listeners"]["Event"] == ["event_handler"]
+
+
+def test_module_declared_contract_enforcement() -> None:
+    calls: list[str] = []
+
+    async def middleware(ctx: ExecutionContext, msg: Ping, call_next):  # type: ignore[no-untyped-def]
+        calls.append("before")
+        result = await call_next(msg)
+        calls.append("after")
+        return result
+
+    @handle(Ping)
+    async def ping_handler(message: Ping) -> str:
+        return message.value
+
+    module = RawModule(name="ping", commands=[Ping], handlers=[ping_handler], middlewares=[middleware])
+    app = App(modules=[module])
+    assert asyncio.run(app.execute(Ping(value="ok"))) == "ok"
+    assert calls == ["before", "after"]
+
+    @dataclass(slots=True)
+    class Other(Command):
+        value: str
+
+    @handle(Other)
+    async def wrong_handler(message: Other) -> str:
+        return message.value
+
+    with pytest.raises(ValueError):
+        App(modules=[RawModule(name="bad", commands=[Ping], handlers=[wrong_handler])])
+
+
+def test_dispatcher_exception_hooks_and_result_normalization() -> None:
+    dispatcher = Dispatcher(registry=HandlerRegistry(), container=Container())
+    seen: list[str] = []
+
+    @dataclass(slots=True)
+    class Payload:
+        value: int
+
+    @handle(Ping)
+    async def ok_handler(message: Ping):
+        return Payload(value=1)
+
+    dispatcher.register_handler(Ping, ok_handler)
+    result = asyncio.run(dispatcher.dispatch(Ping(value="x"), context=ExecutionContext(), scoped_cache={}))
+    assert result == {"value": 1}
+
+    @handle(Ping)
+    async def bad_handler(message: Ping) -> str:
+        raise ValueError("boom")
+
+    dispatcher.registry.message_handlers[Ping] = bad_handler
+
+    async def on_exception(ctx: ExecutionContext, msg: Ping, exc: Exception) -> None:
+        seen.append(type(exc).__name__)
+
+    dispatcher.add_exception_hook(on_exception)
+    with pytest.raises(ValueError):
+        asyncio.run(dispatcher.dispatch(Ping(value="x"), context=ExecutionContext(), scoped_cache={}))
+    assert seen == ["ValueError"]
+
+
+def test_container_transient_and_teardown_support() -> None:
+    container = Container()
+    created: list[int] = []
+    closed: list[int] = []
+
+    class Resource:
+        def __init__(self, value: int) -> None:
+            self.value = value
+
+    def make_resource() -> Resource:
+        value = len(created) + 1
+        created.append(value)
+        return Resource(value)
+
+    async def teardown_resource(resource: Resource) -> None:
+        closed.append(resource.value)
+
+    container.register(provider(Resource, make_resource, scope=Scope.TRANSIENT, teardown=teardown_resource))
+
+    async def run() -> tuple[int, int]:
+        async with container.ascope() as scoped:
+            first = container.resolve(Resource, scoped)
+            second = container.resolve(Resource, scoped)
+            return first.value, second.value
+
+    first, second = asyncio.run(run())
+    assert first == 1
+    assert second == 2
+    assert closed == [2, 1]
+
+
+def test_app_kernel_runtime_primitives_and_transports() -> None:
+    app = App()
+    assert isinstance(app.state, AppState)
+    assert isinstance(app.lifecycle, LifecycleManager)
+
+    app.register_transport("http", object())
+    assert app.get_transport("http") is not None
+    with pytest.raises(ValueError):
+        app.register_transport("http", object())
+
+    seen: list[str] = []
+
+    async def startup() -> None:
+        seen.append("startup")
+
+    async def shutdown() -> None:
+        seen.append("shutdown")
+
+    app.add_startup_hook(startup)
+    app.add_shutdown_hook(shutdown)
+    asyncio.run(app.startup())
+    asyncio.run(app.shutdown())
+    assert seen == ["startup", "shutdown"]
+
+
+def test_app_execute_uses_internal_transport_context() -> None:
+    @handle(Ping)
+    async def handler(message: Ping, context: ExecutionContext) -> str:
+        return context.transport
+
+    app = App(modules=[RawModule(handlers=[handler])])
+    assert asyncio.run(app.execute(Ping(value="x"))) == "internal"

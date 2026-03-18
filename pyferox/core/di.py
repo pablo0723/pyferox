@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable
-from contextlib import contextmanager
+from collections.abc import Awaitable, Callable, MutableMapping
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -14,6 +14,7 @@ class Scope(StrEnum):
     APP = "app"
     REQUEST = "request"
     JOB = "job"
+    TRANSIENT = "transient"
 
 
 class ResolutionError(LookupError):
@@ -21,6 +22,7 @@ class ResolutionError(LookupError):
 
 
 Factory = Callable[..., Any]
+Teardown = Callable[[Any], Any | Awaitable[Any]]
 
 
 @dataclass(slots=True)
@@ -29,19 +31,47 @@ class Provider:
     factory: Factory | None = None
     instance: Any = None
     scope: Scope = Scope.APP
+    teardown: Teardown | None = None
 
     @property
     def has_instance(self) -> bool:
         return self.instance is not None
 
 
-def provider(key: type[Any], factory: Factory, scope: Scope = Scope.APP) -> Provider:
-    return Provider(key=key, factory=factory, scope=scope)
+def provider(
+    key: type[Any],
+    factory: Factory,
+    scope: Scope = Scope.APP,
+    *,
+    teardown: Teardown | None = None,
+) -> Provider:
+    return Provider(key=key, factory=factory, scope=scope, teardown=teardown)
 
 
 def singleton(instance: Any, key: type[Any] | None = None) -> Provider:
     resolved_key = key or type(instance)
     return Provider(key=resolved_key, instance=instance, scope=Scope.APP)
+
+
+class ScopedCache(dict[type[Any], Any]):
+    def __init__(self) -> None:
+        super().__init__()
+        self._teardowns: list[tuple[Teardown, Any]] = []
+
+    def add_teardown(self, teardown: Teardown, value: Any) -> None:
+        self._teardowns.append((teardown, value))
+
+    def close(self) -> None:
+        for teardown, value in reversed(self._teardowns):
+            result = teardown(value)
+            if inspect.isawaitable(result):
+                raise RuntimeError("Async teardown requires Container.ascope()")
+
+    async def aclose(self) -> None:
+        for teardown, value in reversed(self._teardowns):
+            result = teardown(value)
+            if inspect.isawaitable(result):
+                await result
 
 
 class Container:
@@ -55,11 +85,22 @@ class Container:
             self._singletons[entry.key] = entry.instance
 
     @contextmanager
-    def scope(self) -> dict[type[Any], Any]:
-        cache: dict[type[Any], Any] = {}
-        yield cache
+    def scope(self) -> ScopedCache:
+        cache = ScopedCache()
+        try:
+            yield cache
+        finally:
+            cache.close()
 
-    def resolve(self, key: type[Any], scoped_cache: dict[type[Any], Any] | None = None) -> Any:
+    @asynccontextmanager
+    async def ascope(self):
+        cache = ScopedCache()
+        try:
+            yield cache
+        finally:
+            await cache.aclose()
+
+    def resolve(self, key: type[Any], scoped_cache: MutableMapping[type[Any], Any] | None = None) -> Any:
         provider_entry = self._providers.get(key)
         if provider_entry is None:
             raise ResolutionError(f"No provider registered for type: {key}")
@@ -71,6 +112,11 @@ class Container:
             self._singletons[key] = value
             return value
 
+        if provider_entry.scope == Scope.TRANSIENT:
+            value = self._build(provider_entry, scoped_cache)
+            self._register_teardown(provider_entry, value, scoped_cache)
+            return value
+
         if scoped_cache is None:
             raise ResolutionError(f"Scoped provider requires scope for type: {key}")
 
@@ -78,9 +124,10 @@ class Container:
             return scoped_cache[key]
         value = self._build(provider_entry, scoped_cache)
         scoped_cache[key] = value
+        self._register_teardown(provider_entry, value, scoped_cache)
         return value
 
-    def _build(self, entry: Provider, scoped_cache: dict[type[Any], Any] | None) -> Any:
+    def _build(self, entry: Provider, scoped_cache: MutableMapping[type[Any], Any] | None) -> Any:
         if entry.has_instance:
             return entry.instance
         if entry.factory is None:
@@ -96,3 +143,14 @@ class Container:
         if len(positional) == 1:
             return entry.factory(self)
         return entry.factory()
+
+    def _register_teardown(
+        self,
+        entry: Provider,
+        value: Any,
+        scoped_cache: MutableMapping[type[Any], Any] | None,
+    ) -> None:
+        if entry.teardown is None:
+            return
+        if isinstance(scoped_cache, ScopedCache):
+            scoped_cache.add_teardown(entry.teardown, value)

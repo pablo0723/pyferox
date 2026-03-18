@@ -1,6 +1,5 @@
 """Logging utilities and middleware hooks."""
 
-from pyferox.logging.hooks import RequestLoggingMiddleware, get_logger
+from pyferox.logging.hooks import AppLifecycleLoggingHooks, RequestLoggingMiddleware, get_logger, install_logging_hooks
 
-__all__ = ["RequestLoggingMiddleware", "get_logger"]
-
+__all__ = ["AppLifecycleLoggingHooks", "RequestLoggingMiddleware", "get_logger", "install_logging_hooks"]

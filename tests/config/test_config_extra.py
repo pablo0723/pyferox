@@ -59,3 +59,15 @@ def test_load_config_prod_profile_overrides_debug_and_echo(monkeypatch) -> None:
     assert cfg.profile == ConfigProfile.PROD
     assert cfg.database.echo is False
     assert cfg.http.debug is False
+
+
+def test_load_config_composes_module_level_settings(monkeypatch) -> None:
+    monkeypatch.setenv("PYFEROX_MODULE_USERS__MAX_PAGE_SIZE", "250")
+    monkeypatch.setenv("PYFEROX_MODULE_USERS__ENABLED", "true")
+    monkeypatch.setenv("PYFEROX_MODULE_BILLING__TAX_RATE", "0.2")
+
+    cfg = load_config(load_dotenv=False)
+
+    assert cfg.modules["users"].values["max_page_size"] == 250
+    assert cfg.modules["users"].values["enabled"] is True
+    assert cfg.modules["billing"].values["tax_rate"] == 0.2

@@ -71,11 +71,17 @@ class HttpConfig:
 
 
 @dataclass(slots=True)
+class ModuleConfig:
+    values: dict[str, str | int | float | bool] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class AppConfig:
     profile: ConfigProfile = ConfigProfile.DEV
     app_name: str = "pyferox-app"
     database: DatabaseConfig = field(default_factory=lambda: DatabaseConfig(url="sqlite+aiosqlite:///./app.db"))
     http: HttpConfig = field(default_factory=HttpConfig)
+    modules: dict[str, ModuleConfig] = field(default_factory=dict)
     secret_key: str | None = None
 
 
@@ -110,6 +116,41 @@ def _parse_int(raw: str, *, key: str) -> int:
         raise ValueError(f"Invalid integer for {key}: {raw}") from exc
 
 
+def _parse_scalar(raw: str) -> str | int | float | bool:
+    lowered = raw.strip().lower()
+    if lowered in {"1", "true", "yes", "on"}:
+        return True
+    if lowered in {"0", "false", "no", "off"}:
+        return False
+    try:
+        return int(raw)
+    except ValueError:
+        pass
+    try:
+        return float(raw)
+    except ValueError:
+        return raw
+
+
+def load_module_config(env_prefix: str) -> dict[str, ModuleConfig]:
+    modules: dict[str, ModuleConfig] = {}
+    prefix = f"{env_prefix}MODULE_"
+    for key, raw_value in os.environ.items():
+        if not key.startswith(prefix):
+            continue
+        remainder = key[len(prefix) :]
+        if "__" not in remainder:
+            continue
+        module_name, setting_name = remainder.split("__", 1)
+        module_key = module_name.strip().lower()
+        setting_key = setting_name.strip().lower()
+        if not module_key or not setting_key:
+            continue
+        module_config = modules.setdefault(module_key, ModuleConfig())
+        module_config.values[setting_key] = _parse_scalar(raw_value)
+    return modules
+
+
 def load_config(
     *,
     env_prefix: str = "PYFEROX_",
@@ -139,11 +180,13 @@ def load_config(
     if resolved_profile == ConfigProfile.PROD:
         db_echo = False
         http_debug = False
+    modules = load_module_config(env_prefix)
 
     return AppConfig(
         profile=resolved_profile,
         app_name=app_name,
         database=DatabaseConfig(url=db_url, echo=db_echo),
         http=HttpConfig(host=http_host, port=http_port, debug=http_debug),
+        modules=modules,
         secret_key=secret_key,
     )

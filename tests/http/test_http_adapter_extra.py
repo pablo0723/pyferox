@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from pyferox import App, Query, Streamed
+from pyferox import App, Command, ExecutionContext, Query, Streamed
 from pyferox.auth import Identity, Principal
 from pyferox.core import Module, handle
 from pyferox.core.errors import ValidationError
@@ -143,3 +143,29 @@ def test_send_stream_with_async_iterator() -> None:
     asyncio.run(_send_stream(send, 200, Streamed(chunks=chunks(), content_type="text/plain")))
     bodies = [item.get("body", b"") for item in sent if item["type"] == "http.response.body"]
     assert b"".join(bodies) == b"ab"
+
+
+class CreateNote(Command):
+    title: str
+
+
+@handle(CreateNote)
+async def create_note(cmd: CreateNote, context: ExecutionContext) -> dict[str, str]:
+    return {"title": cmd.title, "transport": context.transport}
+
+
+def test_http_adapter_binds_plain_command_contract_and_transport_label() -> None:
+    app = App(modules=[Module(handlers=[create_note])])
+    http = HTTPAdapter(app)
+    http.command("POST", "/notes", CreateNote, status_code=201)
+    sent = asyncio.run(
+        _call_asgi(
+            http,
+            scope={"type": "http", "method": "POST", "path": "/notes", "query_string": b"", "headers": []},
+            receive_events=[{"type": "http.request", "body": b'{"title":"hello"}', "more_body": False}],
+        )
+    )
+    start = next(item for item in sent if item["type"] == "http.response.start")
+    body = next(item for item in sent if item["type"] == "http.response.body")
+    assert start["status"] == 201
+    assert body["body"] == b'{"title": "hello", "transport": "http"}'

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import msgspec
 import pytest
 
+from pyferox import Command, Query, contract, get_contract_metadata
 from pyferox.core.errors import ValidationError
 from pyferox.schema import TypedSchema, parse_input, serialize_output
 from pyferox.schema import runtime as schema_runtime
@@ -116,3 +117,28 @@ def test_details_from_msgspec_error_missing_and_unknown() -> None:
 def test_format_validation_error_without_details_branch() -> None:
     payload = schema_runtime.format_validation_error(ValidationError("bad"))
     assert payload == {"type": "validation_error", "error": "bad"}
+
+
+def test_parse_input_for_plain_command_contract() -> None:
+    class CreateUser(Command):
+        email: str
+        age: int = 18
+
+    parsed = parse_input(CreateUser, {"email": "a@example.com"})
+    assert isinstance(parsed, CreateUser)
+    assert parsed.email == "a@example.com"
+    assert parsed.age == 18
+
+    with pytest.raises(ValidationError):
+        parse_input(CreateUser, {"email": "a@example.com", "unknown": True})
+
+
+def test_contract_metadata_helpers() -> None:
+    @contract(audience="internal", version=1)
+    class GetUser(Query):
+        user_id: int
+
+    parsed = parse_input(GetUser, {"user_id": "7"})
+    metadata = get_contract_metadata(parsed)
+    assert metadata["audience"] == "internal"
+    assert metadata["version"] == 1

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import json
+from dataclasses import asdict
 from pathlib import Path
 
 
@@ -21,6 +23,9 @@ def main() -> int:
     run_dev = sub.add_parser("run-dev")
     run_dev.add_argument("--target", default="app.main:http")
 
+    inspect_config = sub.add_parser("inspect-config")
+    inspect_config.add_argument("--profile", choices=["dev", "test", "prod"], default=None)
+
     args = parser.parse_args()
 
     if args.command == "create-project":
@@ -31,6 +36,9 @@ def main() -> int:
         return 0
     if args.command == "run-dev":
         _run_dev(args.target)
+        return 0
+    if args.command == "inspect-config":
+        _inspect_config(profile=args.profile)
         return 0
     return 1
 
@@ -72,6 +80,14 @@ def _run_dev(target: str) -> None:
     module = importlib.import_module(module_name)
     app = getattr(module, obj_name)
     uvicorn.run(app, host="127.0.0.1", port=8000, reload=True)
+
+
+def _inspect_config(*, profile: str | None = None) -> None:
+    from pyferox.config import ConfigProfile, load_config
+
+    resolved_profile = ConfigProfile(profile) if profile is not None else None
+    config = load_config(profile=resolved_profile)
+    print(json.dumps(asdict(config), indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":  # pragma: no cover

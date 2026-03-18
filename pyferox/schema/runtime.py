@@ -5,11 +5,12 @@ from __future__ import annotations
 import inspect
 import re
 from dataclasses import is_dataclass
-from typing import Any, Generic, TypeVar
+from typing import Any, ClassVar, Generic, TypeVar, get_origin, get_type_hints
 
 import msgspec
 
 from pyferox.core.errors import ValidationError
+from pyferox.core.messages import Message, is_message_type
 from pyferox.core.results import Streamed, to_payload
 
 TIn = TypeVar("TIn")
@@ -22,6 +23,14 @@ _UNKNOWN_FIELD_RE = re.compile(r"^Object contains unknown field `(?P<field>[^`]+
 
 class SchemaModel(msgspec.Struct, forbid_unknown_fields=True):
     """Preferred strict schema base for external payloads."""
+
+
+class Schema(SchemaModel):
+    """Alias for schema contracts to keep public API semantic."""
+
+
+class DTO(SchemaModel):
+    """Alias for response/data transfer contracts."""
 
 
 class TypedSchema(Generic[TIn, TOut]):
@@ -46,6 +55,8 @@ def parse_input(
     *,
     error_message: str = "Input validation failed",
 ) -> Any:
+    if _is_message_contract(schema_type):
+        return _parse_message_contract(schema_type, payload, error_message=error_message)
     if _is_schema_model(schema_type) and isinstance(payload, dict):
         issues = _schema_model_field_issues(schema_type, payload)
         if issues:
@@ -127,9 +138,61 @@ def _supports_kwargs_fallback(schema_type: type[Any], payload: Any) -> bool:
         return False
     if issubclass(schema_type, msgspec.Struct):
         return False
+    if issubclass(schema_type, Message):
+        return False
     if issubclass(schema_type, (str, int, float, bool, bytes, bytearray, list, tuple, set, dict)):
         return False
     return True
+
+
+def _is_message_contract(schema_type: type[Any]) -> bool:
+    return (
+        inspect.isclass(schema_type)
+        and is_message_type(schema_type)
+        and not issubclass(schema_type, msgspec.Struct)
+    )
+
+
+def _parse_message_contract(schema_type: type[Message], payload: Any, *, error_message: str) -> Any:
+    contract_schema = _get_contract_schema(schema_type)
+    try:
+        parsed = msgspec.convert(payload, type=contract_schema, strict=False)
+    except msgspec.ValidationError as exc:
+        raise ValidationError(error_message, details=_details_from_msgspec_error(exc)) from exc
+    data = msgspec.to_builtins(parsed)
+    if is_dataclass(schema_type):
+        return schema_type(**data)
+
+    try:
+        return schema_type(**data)
+    except TypeError:
+        instance = schema_type.__new__(schema_type)
+        for key, value in data.items():
+            setattr(instance, key, value)
+        return instance
+
+
+def _get_contract_schema(schema_type: type[Message]) -> type[msgspec.Struct]:
+    cached = getattr(schema_type, "__pyferox_contract_schema__", None)
+    if cached is not None:
+        return cached
+
+    hints = get_type_hints(schema_type, include_extras=True)
+    fields: list[tuple[Any, ...]] = []
+    for name, annotation in hints.items():
+        if name.startswith("_"):
+            continue
+        if get_origin(annotation) is ClassVar:
+            continue
+        default = getattr(schema_type, name, msgspec.NODEFAULT)
+        if default is msgspec.NODEFAULT:
+            fields.append((name, annotation))
+        else:
+            fields.append((name, annotation, default))
+    struct_name = f"{schema_type.__name__}Contract"
+    contract_schema = msgspec.defstruct(struct_name, fields, forbid_unknown_fields=True)
+    setattr(schema_type, "__pyferox_contract_schema__", contract_schema)
+    return contract_schema
 
 
 def _is_schema_model(schema_type: type[Any]) -> bool:

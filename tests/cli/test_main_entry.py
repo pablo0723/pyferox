@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import builtins
 import importlib
+import json
 import sys
 import types
+from dataclasses import dataclass
 
 import pytest
 
@@ -36,6 +38,14 @@ def test_main_dispatches_run_dev(monkeypatch) -> None:
     monkeypatch.setattr(cli_main, "_run_dev", lambda target: seen.setdefault("target", target))
     assert cli_main.main() == 0
     assert seen["target"] == "demo.main:http"
+
+
+def test_main_dispatches_inspect_config(monkeypatch) -> None:
+    seen: dict[str, str | None] = {}
+    monkeypatch.setattr(sys, "argv", ["pyferox", "inspect-config", "--profile", "test"])
+    monkeypatch.setattr(cli_main, "_inspect_config", lambda profile=None: seen.setdefault("profile", profile))
+    assert cli_main.main() == 0
+    assert seen["profile"] == "test"
 
 
 def test_main_returns_non_zero_for_unknown_command(monkeypatch) -> None:
@@ -72,3 +82,15 @@ def test_run_dev_raises_when_uvicorn_missing(monkeypatch) -> None:
     monkeypatch.setattr(builtins, "__import__", fake_import)
     with pytest.raises(RuntimeError):
         cli_main._run_dev("demo_target:http")
+
+
+def test_inspect_config_prints_json(monkeypatch, capsys) -> None:
+    @dataclass(slots=True)
+    class FakeConfig:
+        profile: str = "dev"
+
+    monkeypatch.setattr("pyferox.config.load_config", lambda profile=None: FakeConfig(profile="test"))
+    cli_main._inspect_config(profile="test")
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["profile"] == "test"
