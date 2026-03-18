@@ -21,6 +21,7 @@ from pyferox.core.errors import (
 from pyferox.core.results import Paginated, Response, Streamed
 from pyferox.schema import get_schema_metadata, parse_input, serialize_output
 from pyferox.core.pagination import PageParams, build_page_params, parse_sort
+from pyferox.ops import HealthRegistry
 
 
 @dataclass(slots=True)
@@ -67,6 +68,9 @@ class HTTPAdapter:
         self._openapi_path: str | None = None
         self._openapi_title = "PyFerOx API"
         self._openapi_version = "0.1.0"
+        self._health_registry: HealthRegistry | None = None
+        self._liveness_path: str | None = None
+        self._readiness_path: str | None = None
 
     def route(
         self,
@@ -193,6 +197,17 @@ class HTTPAdapter:
         self._openapi_title = title
         self._openapi_version = version
 
+    def enable_health_checks(
+        self,
+        registry: HealthRegistry,
+        *,
+        liveness_path: str = "/health/live",
+        readiness_path: str = "/health/ready",
+    ) -> None:
+        self._health_registry = registry
+        self._liveness_path = liveness_path
+        self._readiness_path = readiness_path
+
     def openapi_spec(self) -> dict[str, Any]:
         paths: dict[str, dict[str, Any]] = {}
         for route in self._routes:
@@ -291,6 +306,24 @@ class HTTPAdapter:
         path = scope.get("path", "/")
         if self._openapi_path is not None and method == "GET" and path == self._openapi_path:
             await _send_json(send, 200, self.openapi_spec())
+            return
+        if (
+            self._health_registry is not None
+            and method == "GET"
+            and self._liveness_path is not None
+            and path == self._liveness_path
+        ):
+            report = await self._health_registry.run_liveness()
+            await _send_json(send, 200 if report.ok else 503, report.to_payload())
+            return
+        if (
+            self._health_registry is not None
+            and method == "GET"
+            and self._readiness_path is not None
+            and path == self._readiness_path
+        ):
+            report = await self._health_registry.run_readiness()
+            await _send_json(send, 200 if report.ok else 503, report.to_payload())
             return
         route, path_params, method_allowed = self._resolve_route(method, path)
         if route is None:

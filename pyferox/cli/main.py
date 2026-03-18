@@ -59,6 +59,21 @@ def main() -> int:
     jobs_run.add_argument("--target", required=True)
     jobs_run.add_argument("--idle-rounds", type=int, default=1)
 
+    worker_run = sub.add_parser("worker-run")
+    worker_run.add_argument("--target", required=True)
+    worker_run.add_argument("--idle-timeout", type=float, default=0.25)
+    worker_run.add_argument("--max-iterations", type=int, default=0)
+
+    scheduler_run = sub.add_parser("scheduler-run")
+    scheduler_run.add_argument("--target", required=True)
+    scheduler_run.add_argument("--ticks", type=int, default=1)
+
+    health_check = sub.add_parser("health-check")
+    health_check.add_argument("--target", required=True)
+
+    ops_diag = sub.add_parser("ops-diagnostics")
+    ops_diag.add_argument("--target", required=True)
+
     sub.add_parser("env-diagnostics")
 
     args = parser.parse_args()
@@ -95,6 +110,18 @@ def main() -> int:
         return 0
     if args.command == "jobs-run":
         _run_jobs(args.target, idle_rounds=args.idle_rounds)
+        return 0
+    if args.command == "worker-run":
+        _run_worker(args.target, idle_timeout=args.idle_timeout, max_iterations=args.max_iterations)
+        return 0
+    if args.command == "scheduler-run":
+        _run_scheduler(args.target, ticks=args.ticks)
+        return 0
+    if args.command == "health-check":
+        _run_health_check(args.target)
+        return 0
+    if args.command == "ops-diagnostics":
+        _run_ops_diagnostics(args.target)
         return 0
     if args.command == "env-diagnostics":
         _env_diagnostics()
@@ -186,6 +213,168 @@ def _run_jobs(target: str, *, idle_rounds: int = 1) -> None:
         raise RuntimeError("jobs-run target must be a LocalJobWorker, async callable, or object with run_until_idle()")
 
     asyncio.run(run_obj(target_obj))
+
+
+def _run_worker(target: str, *, idle_timeout: float = 0.25, max_iterations: int = 0) -> None:
+    target_obj = _import_target(target)
+
+    async def run_obj(obj: object) -> None:
+        if max_iterations > 0:
+            dispatcher = getattr(obj, "dispatcher", None)
+            run_once = getattr(dispatcher, "run_once", None) if dispatcher is not None else None
+            if callable(run_once):
+                for _ in range(max_iterations):
+                    result = run_once(timeout=idle_timeout)
+                    if inspect.isawaitable(result):
+                        await result
+                return
+
+        run_forever = getattr(obj, "run_forever", None)
+        if callable(run_forever):
+            result = run_forever(poll_interval=idle_timeout)
+            if inspect.isawaitable(result):
+                await result
+            return
+
+        run_method = getattr(obj, "run", None)
+        if callable(run_method):
+            result = run_method(idle_timeout=idle_timeout)
+            if inspect.isawaitable(result):
+                await result
+            return
+
+        run_until_idle = getattr(obj, "run_until_idle", None)
+        if callable(run_until_idle):
+            result = run_until_idle(idle_rounds=max(1, max_iterations or 1), timeout=idle_timeout)
+            if inspect.isawaitable(result):
+                await result
+            return
+
+        if callable(obj):
+            nested = obj()
+            if inspect.isawaitable(nested):
+                nested = await nested
+            await run_obj(nested)
+            return
+
+        raise RuntimeError("worker-run target must expose run/run_forever/run_until_idle semantics")
+
+    asyncio.run(run_obj(target_obj))
+
+
+def _run_scheduler(target: str, *, ticks: int = 1) -> None:
+    target_obj = _import_target(target)
+
+    async def run_obj(obj: object) -> None:
+        run_once = getattr(obj, "run_once", None)
+        if callable(run_once):
+            for _ in range(max(1, ticks)):
+                result = run_once()
+                if inspect.isawaitable(result):
+                    await result
+            return
+
+        run_pending = getattr(obj, "run_pending", None)
+        if callable(run_pending):
+            for _ in range(max(1, ticks)):
+                result = run_pending()
+                if inspect.isawaitable(result):
+                    await result
+            return
+
+        if callable(obj):
+            nested = obj()
+            if inspect.isawaitable(nested):
+                nested = await nested
+            await run_obj(nested)
+            return
+
+        raise RuntimeError("scheduler-run target must expose run_once or run_pending")
+
+    asyncio.run(run_obj(target_obj))
+
+
+def _run_health_check(target: str) -> None:
+    target_obj = _import_target(target)
+
+    async def run_obj(obj: object) -> dict[str, object]:
+        from pyferox.ops import HealthRegistry
+
+        if isinstance(obj, HealthRegistry):
+            report = await obj.run_readiness()
+            return report.to_payload()
+
+        run_readiness = getattr(obj, "run_readiness", None)
+        if callable(run_readiness):
+            result = run_readiness()
+            if inspect.isawaitable(result):
+                result = await result
+            if hasattr(result, "to_payload"):
+                return result.to_payload()
+            if isinstance(result, dict):
+                return result
+            return {"ok": bool(result)}
+
+        if callable(obj):
+            result = obj()
+            if inspect.isawaitable(result):
+                result = await result
+            if isinstance(result, dict):
+                return result
+            return {"ok": bool(result)}
+
+        raise RuntimeError("health-check target must be a HealthRegistry, callable, or object with run_readiness()")
+
+    payload = asyncio.run(run_obj(target_obj))
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    if not bool(payload.get("ok", False)):
+        raise RuntimeError("Health check failed")
+
+
+def _run_ops_diagnostics(target: str) -> None:
+    target_obj = _import_target(target)
+
+    async def run_obj(obj: object) -> dict[str, object]:
+        from pyferox.ops import collect_operational_diagnostics
+
+        diagnostics = getattr(obj, "diagnostics", None)
+        if callable(diagnostics):
+            value = diagnostics()
+            if inspect.isawaitable(value):
+                value = await value
+            if isinstance(value, dict):
+                return value
+
+        if callable(obj):
+            value = obj()
+            if inspect.isawaitable(value):
+                value = await value
+            if isinstance(value, dict):
+                return value
+
+        health_registry = getattr(obj, "health_registry", None)
+        trace_collector = getattr(obj, "trace_collector", None)
+        if health_registry is not None or trace_collector is not None:
+            return await collect_operational_diagnostics(
+                health_registry=health_registry,
+                trace_collector=trace_collector,
+            )
+
+        from pyferox.ops import HealthRegistry, InMemoryTraceCollector
+
+        if isinstance(obj, HealthRegistry):
+            return await collect_operational_diagnostics(health_registry=obj)
+        if isinstance(obj, InMemoryTraceCollector):
+            return await collect_operational_diagnostics(trace_collector=obj)
+
+        raise RuntimeError(
+            "ops-diagnostics target must be a diagnostics() object/callable or include health_registry/trace_collector"
+        )
+
+    payload = asyncio.run(run_obj(target_obj))
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    if not bool(payload.get("ok", True)):
+        raise RuntimeError("Operational diagnostics report is not healthy")
 
 
 def _inspect_config(*, profile: str | None = None) -> None:

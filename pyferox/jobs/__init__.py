@@ -8,6 +8,8 @@ from pyferox.jobs.runtime import (
     JobQueue,
     JobStatus,
     LocalJobWorker,
+    WorkerRuntime,
+    create_worker_runtime,
 )
 
 __all__ = [
@@ -18,5 +20,6 @@ __all__ = [
     "JobQueue",
     "JobStatus",
     "LocalJobWorker",
+    "WorkerRuntime",
+    "create_worker_runtime",
 ]
-

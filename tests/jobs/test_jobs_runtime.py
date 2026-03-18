@@ -4,7 +4,8 @@ import asyncio
 from dataclasses import dataclass
 
 from pyferox import App, Module, handle
-from pyferox.jobs import Job, JobDispatcher, JobStatus, LocalJobWorker
+from pyferox.jobs import Job, JobDispatcher, JobStatus, LocalJobWorker, create_worker_runtime
+from pyferox.reliability import InMemoryIdempotencyStore
 
 
 @dataclass(slots=True)
@@ -95,3 +96,43 @@ def test_job_dispatcher_delay_support() -> None:
     assert got_second is True
     assert seen == ["later@example.com"]
 
+
+def test_job_dispatcher_idempotency_skips_duplicate_job() -> None:
+    seen: list[str] = []
+
+    @handle(SendEmail)
+    async def send_email(job: SendEmail) -> None:
+        seen.append(job.address)
+
+    app = App(modules=[Module(handlers=[send_email])])
+    dispatcher = JobDispatcher(app, idempotency_store=InMemoryIdempotencyStore())
+
+    async def run() -> tuple[JobStatus | None, JobStatus | None]:
+        await dispatcher.enqueue(SendEmail(address="x@example.com"), idempotency_key="job-1")
+        await dispatcher.enqueue(SendEmail(address="x@example.com"), idempotency_key="job-1")
+        first = await dispatcher.run_once(timeout=0.1)
+        second = await dispatcher.run_once(timeout=0.1)
+        return first.status if first else None, second.status if second else None
+
+    first_status, second_status = asyncio.run(run())
+    assert first_status == JobStatus.SUCCESS
+    assert second_status == JobStatus.SKIPPED
+    assert seen == ["x@example.com"]
+
+
+def test_create_worker_runtime_bootstrap_helper() -> None:
+    seen: list[str] = []
+
+    @handle(SendEmail)
+    async def send_email(job: SendEmail) -> None:
+        seen.append(job.address)
+
+    app = App(modules=[Module(handlers=[send_email])])
+    worker = create_worker_runtime(app)
+
+    async def run() -> None:
+        await worker.dispatcher.enqueue(SendEmail(address="worker@example.com"))
+        await worker.run_until_idle()
+
+    asyncio.run(run())
+    assert seen == ["worker@example.com"]

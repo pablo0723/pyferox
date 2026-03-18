@@ -11,6 +11,7 @@ from pyferox import App, Command, ExecutionContext, PageParams, Paginated, Query
 from pyferox.auth import Identity, Principal, requires
 from pyferox.core import Module, handle
 from pyferox.core.errors import ValidationError
+from pyferox.ops import HealthRegistry
 from pyferox.http.adapter import (
     HTTPAdapter,
     Route,
@@ -236,6 +237,34 @@ def test_http_adapter_openapi_generation_and_endpoint() -> None:
     assert start["status"] == 200
     payload = body["body"].decode("utf-8")
     assert '"title": "Demo API"' in payload
+
+
+def test_http_adapter_health_endpoints() -> None:
+    app = App(modules=[Module(handlers=[who_am_i])])
+    registry = HealthRegistry()
+    registry.add_liveness("live", lambda: True)
+    registry.add_readiness("db", lambda: {"ok": False, "reason": "down"})
+
+    http = HTTPAdapter(app)
+    http.enable_health_checks(registry, liveness_path="/health/live", readiness_path="/health/ready")
+
+    live_sent = asyncio.run(
+        _call_asgi(
+            http,
+            scope={"type": "http", "method": "GET", "path": "/health/live", "query_string": b"", "headers": []},
+        )
+    )
+    ready_sent = asyncio.run(
+        _call_asgi(
+            http,
+            scope={"type": "http", "method": "GET", "path": "/health/ready", "query_string": b"", "headers": []},
+        )
+    )
+
+    live_start = next(item for item in live_sent if item["type"] == "http.response.start")
+    ready_start = next(item for item in ready_sent if item["type"] == "http.response.start")
+    assert live_start["status"] == 200
+    assert ready_start["status"] == 503
 
 
 @handle(CreateNote)

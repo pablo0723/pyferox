@@ -156,6 +156,43 @@ def test_main_dispatches_jobs_and_env_diagnostics(monkeypatch) -> None:
     assert seen["env"] is True
 
 
+def test_main_dispatches_phase3_runtime_commands(monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["pyferox", "worker-run", "--target", "demo.jobs:worker", "--idle-timeout", "0.1", "--max-iterations", "2"],
+    )
+    monkeypatch.setattr(
+        cli_main,
+        "_run_worker",
+        lambda target, idle_timeout=0.25, max_iterations=0: seen.update(
+            {"worker_target": target, "idle_timeout": idle_timeout, "max_iterations": max_iterations}
+        ),
+    )
+    assert cli_main.main() == 0
+
+    monkeypatch.setattr(sys, "argv", ["pyferox", "scheduler-run", "--target", "demo.scheduler:runtime", "--ticks", "3"])
+    monkeypatch.setattr(cli_main, "_run_scheduler", lambda target, ticks=1: seen.update({"scheduler_target": target, "ticks": ticks}))
+    assert cli_main.main() == 0
+
+    monkeypatch.setattr(sys, "argv", ["pyferox", "health-check", "--target", "demo.health:registry"])
+    monkeypatch.setattr(cli_main, "_run_health_check", lambda target: seen.update({"health_target": target}))
+    assert cli_main.main() == 0
+
+    monkeypatch.setattr(sys, "argv", ["pyferox", "ops-diagnostics", "--target", "demo.ops:runtime"])
+    monkeypatch.setattr(cli_main, "_run_ops_diagnostics", lambda target: seen.update({"ops_target": target}))
+    assert cli_main.main() == 0
+
+    assert seen["worker_target"] == "demo.jobs:worker"
+    assert seen["max_iterations"] == 2
+    assert seen["scheduler_target"] == "demo.scheduler:runtime"
+    assert seen["ticks"] == 3
+    assert seen["health_target"] == "demo.health:registry"
+    assert seen["ops_target"] == "demo.ops:runtime"
+
+
 def test_run_migration_raises_on_failure(monkeypatch) -> None:
     class Result:
         ok = False
@@ -183,6 +220,69 @@ def test_run_jobs_supports_worker_object(monkeypatch) -> None:
 
     cli_main._run_jobs("demo_jobs:worker", idle_rounds=3)
     assert worker.called == 3
+
+
+def test_run_worker_supports_dispatcher_iteration(monkeypatch) -> None:
+    class Dispatcher:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def run_once(self, timeout=0.0) -> None:
+            self.calls += 1
+
+    class Worker:
+        def __init__(self) -> None:
+            self.dispatcher = Dispatcher()
+
+    worker = Worker()
+    module = types.ModuleType("demo_worker")
+    module.worker = worker
+    monkeypatch.setitem(sys.modules, "demo_worker", module)
+
+    cli_main._run_worker("demo_worker:worker", idle_timeout=0.01, max_iterations=2)
+    assert worker.dispatcher.calls == 2
+
+
+def test_run_scheduler_and_health_helpers(monkeypatch, capsys) -> None:
+    class Scheduler:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def run_once(self) -> None:
+            self.calls += 1
+
+    scheduler = Scheduler()
+    scheduler_module = types.ModuleType("demo_scheduler")
+    scheduler_module.runtime = scheduler
+    monkeypatch.setitem(sys.modules, "demo_scheduler", scheduler_module)
+    cli_main._run_scheduler("demo_scheduler:runtime", ticks=3)
+    assert scheduler.calls == 3
+
+    class Ready:
+        async def run_readiness(self) -> dict[str, object]:
+            return {"ok": True, "service": "up"}
+
+    ready_module = types.ModuleType("demo_health")
+    ready_module.registry = Ready()
+    monkeypatch.setitem(sys.modules, "demo_health", ready_module)
+    cli_main._run_health_check("demo_health:registry")
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+
+
+def test_run_ops_diagnostics_with_runtime_object(monkeypatch, capsys) -> None:
+    class Runtime:
+        async def diagnostics(self) -> dict[str, object]:
+            return {"ok": True, "workers": 1}
+
+    runtime_module = types.ModuleType("demo_ops")
+    runtime_module.runtime = Runtime()
+    monkeypatch.setitem(sys.modules, "demo_ops", runtime_module)
+
+    cli_main._run_ops_diagnostics("demo_ops:runtime")
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["workers"] == 1
 
 
 def test_env_diagnostics_prints_json(capsys) -> None:
