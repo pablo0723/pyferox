@@ -32,10 +32,19 @@ class Streamed:
     content_type: str = "application/octet-stream"
 
 
+@dataclass(slots=True)
+class Response:
+    data: Any
+    status_code: int = 200
+    headers: dict[str, str] | None = None
+
+
 def to_payload(value: Any) -> Any:
     if isinstance(value, (Success, Paginated, Empty)):
         return asdict(value)
     if isinstance(value, Streamed):
+        return value
+    if isinstance(value, Response):
         return value
     if is_dataclass(value):
         return asdict(value)

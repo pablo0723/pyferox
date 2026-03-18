@@ -4,13 +4,19 @@ import asyncio
 from dataclasses import dataclass
 
 from pyferox import Command, Module, Query, handle
-from pyferox.testing import FakeDispatcher, create_test_app
+from pyferox.testing import FakeDispatcher, create_test_app, create_test_module
 from pyferox.testing.utils import _call_asgi
 
 
 def test_create_test_app_without_modules() -> None:
     app = create_test_app()
     assert app.modules == []
+
+
+def test_create_test_module_helper() -> None:
+    module = create_test_module(name="m1")
+    assert module.name == "m1"
+    assert module.handlers == []
 
 
 @dataclass(slots=True)

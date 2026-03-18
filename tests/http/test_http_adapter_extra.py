@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from dataclasses import field
 from typing import Any
 
 import pytest
 
-from pyferox import App, Command, ExecutionContext, Query, Streamed
-from pyferox.auth import Identity, Principal
+from pyferox import App, Command, ExecutionContext, PageParams, Paginated, Query, Response, SortField, Streamed
+from pyferox.auth import Identity, Principal, requires
 from pyferox.core import Module, handle
 from pyferox.core.errors import ValidationError
 from pyferox.http.adapter import (
@@ -17,6 +18,7 @@ from pyferox.http.adapter import (
     _compile_route_pattern,
     _parse_query_params,
     _read_json_body,
+    _session_token_from_cookie,
     _send_stream,
     _stream_chunk_to_bytes,
 )
@@ -29,6 +31,17 @@ class WhoAmI(Query):
 
 @handle(WhoAmI)
 async def who_am_i(_: WhoAmI) -> dict[str, str]:
+    return {"ok": "yes"}
+
+
+@dataclass(slots=True)
+class ProtectedWhoAmI(Query):
+    pass
+
+
+@handle(ProtectedWhoAmI)
+@requires("users:read")
+async def protected_who_am_i(_: ProtectedWhoAmI) -> dict[str, str]:
     return {"ok": "yes"}
 
 
@@ -87,6 +100,20 @@ def test_http_adapter_permission_checker_missing_branch() -> None:
     assert start["status"] == 403
 
 
+def test_http_adapter_uses_handler_level_permission_declaration() -> None:
+    app = App(modules=[Module(handlers=[protected_who_am_i])])
+    http = HTTPAdapter(app, auth_backend=AllowAllAuthBackend())
+    http.query("GET", "/me/protected", ProtectedWhoAmI)
+    sent = asyncio.run(
+        _call_asgi(
+            http,
+            scope={"type": "http", "method": "GET", "path": "/me/protected", "query_string": b"", "headers": []},
+        )
+    )
+    start = next(item for item in sent if item["type"] == "http.response.start")
+    assert start["status"] == 403
+
+
 def test_compile_route_pattern_requires_leading_slash() -> None:
     with pytest.raises(ValueError):
         _compile_route_pattern("users/{id}")
@@ -125,6 +152,8 @@ def test_read_json_body_requires_object() -> None:
 def test_bearer_token_and_stream_chunk_conversion_helpers() -> None:
     assert _bearer_token("Token abc") is None
     assert _bearer_token("Bearer token-1") == "token-1"
+    assert _session_token_from_cookie("session=s-1; path=/") == "s-1"
+    assert _session_token_from_cookie("foo=bar") is None
     assert _stream_chunk_to_bytes(b"a") == b"a"
     assert _stream_chunk_to_bytes({"x": 1}) == b'{"x": 1}'
     assert _stream_chunk_to_bytes(7) == b"7"
@@ -169,3 +198,163 @@ def test_http_adapter_binds_plain_command_contract_and_transport_label() -> None
     body = next(item for item in sent if item["type"] == "http.response.body")
     assert start["status"] == 201
     assert body["body"] == b'{"title": "hello", "transport": "http"}'
+
+
+def test_http_adapter_openapi_generation_and_endpoint() -> None:
+    app = App(modules=[Module(handlers=[create_note, who_am_i])])
+    http = HTTPAdapter(app)
+    http.command(
+        "POST",
+        "/notes",
+        CreateNote,
+        status_code=201,
+        summary="Create note",
+        tags=("notes",),
+    )
+    http.query("GET", "/me", WhoAmI, permission="users:read", summary="Current user")
+    spec = http.openapi_spec()
+
+    post_op = spec["paths"]["/notes"]["post"]
+    assert post_op["summary"] == "Create note"
+    assert post_op["requestBody"]["required"] is True
+    assert post_op["tags"] == ["notes"]
+
+    get_op = spec["paths"]["/me"]["get"]
+    assert get_op["summary"] == "Current user"
+    assert get_op["security"] == [{"bearerAuth": []}]
+    assert get_op["x-permission"] == "users:read"
+
+    http.enable_openapi(path="/openapi.json", title="Demo API", version="2.0")
+    sent = asyncio.run(
+        _call_asgi(
+            http,
+            scope={"type": "http", "method": "GET", "path": "/openapi.json", "query_string": b"", "headers": []},
+        )
+    )
+    start = next(item for item in sent if item["type"] == "http.response.start")
+    body = next(item for item in sent if item["type"] == "http.response.body")
+    assert start["status"] == 200
+    payload = body["body"].decode("utf-8")
+    assert '"title": "Demo API"' in payload
+
+
+@handle(CreateNote)
+async def create_note_custom_response(cmd: CreateNote) -> Response:
+    return Response(data={"ok": True}, status_code=202, headers={"x-result": "created"})
+
+
+def test_http_adapter_response_helper_support() -> None:
+    app = App(modules=[Module(handlers=[create_note_custom_response])])
+    http = HTTPAdapter(app)
+    http.command("POST", "/notes/custom", CreateNote, status_code=201)
+    sent = asyncio.run(
+        _call_asgi(
+            http,
+            scope={"type": "http", "method": "POST", "path": "/notes/custom", "query_string": b"", "headers": []},
+            receive_events=[{"type": "http.request", "body": b'{"title":"x"}', "more_body": False}],
+        )
+    )
+    start = next(item for item in sent if item["type"] == "http.response.start")
+    assert start["status"] == 202
+    assert (b"x-result", b"created") in start["headers"]
+
+
+class TokenCaptureAuthBackend:
+    def __init__(self) -> None:
+        self.tokens: list[str | None] = []
+
+    async def authenticate(self, token: str | None) -> Principal | None:
+        self.tokens.append(token)
+        return Principal(identity=Identity(subject="s1"), permissions={"p:read"})
+
+
+def test_http_adapter_reads_session_token_from_cookie_and_header() -> None:
+    backend = TokenCaptureAuthBackend()
+    app = App(modules=[Module(handlers=[who_am_i])])
+    http = HTTPAdapter(app, auth_backend=backend)
+    http.query("GET", "/me-token", WhoAmI)
+
+    asyncio.run(
+        _call_asgi(
+            http,
+            scope={
+                "type": "http",
+                "method": "GET",
+                "path": "/me-token",
+                "query_string": b"",
+                "headers": [(b"cookie", b"session=s-cookie")],
+            },
+        )
+    )
+    asyncio.run(
+        _call_asgi(
+            http,
+            scope={
+                "type": "http",
+                "method": "GET",
+                "path": "/me-token",
+                "query_string": b"",
+                "headers": [(b"x-session-token", b"s-header")],
+            },
+        )
+    )
+    assert backend.tokens == ["s-cookie", "s-header"]
+
+
+@dataclass(slots=True)
+class ListUsers(Query):
+    page: PageParams = field(default_factory=PageParams)
+    filters: dict[str, str] = field(default_factory=dict)
+    sorts: list[SortField] = field(default_factory=list)
+
+
+@handle(ListUsers)
+async def list_users(query: ListUsers) -> list[dict[str, int | str]]:
+    assert query.page.page == 2
+    assert query.page.page_size == 1
+    assert query.filters["role"] == "admin"
+    assert query.sorts[0].field == "id"
+    return [{"id": 1, "name": "A"}]
+
+
+@handle(ListUsers)
+async def list_users_paginated(query: ListUsers) -> Paginated:
+    return Paginated(items=[{"id": 1}], total=7, page=2, page_size=1)
+
+
+def test_http_adapter_list_query_conventions_and_paginated_headers() -> None:
+    app = App(modules=[Module(handlers=[list_users])])
+    http = HTTPAdapter(app)
+    http.list_query("GET", "/users", ListUsers)
+    sent = asyncio.run(
+        _call_asgi(
+            http,
+            scope={
+                "type": "http",
+                "method": "GET",
+                "path": "/users",
+                "query_string": b"page=2&page_size=1&sort=-id&filter.role=admin",
+                "headers": [],
+            },
+        )
+    )
+    start = next(item for item in sent if item["type"] == "http.response.start")
+    body = next(item for item in sent if item["type"] == "http.response.body")
+    assert start["status"] == 200
+    assert (b"x-total-count", b"1") in start["headers"]
+    assert (b"x-page", b"2") in start["headers"]
+    assert (b"x-page-size", b"1") in start["headers"]
+    assert body["body"] == b'{"items": [{"id": 1, "name": "A"}], "total": 1, "page": 2, "page_size": 1}'
+
+
+def test_http_adapter_list_query_openapi_baseline() -> None:
+    app = App(modules=[Module(handlers=[list_users_paginated])])
+    http = HTTPAdapter(app)
+    http.list_query("GET", "/users", ListUsers)
+    spec = http.openapi_spec()
+    operation = spec["paths"]["/users"]["get"]
+    parameter_names = [entry["name"] for entry in operation["parameters"]]
+    assert "page" in parameter_names
+    assert "page_size" in parameter_names
+    assert "sort" in parameter_names
+    assert operation["x-filter-prefix"] == "filter."

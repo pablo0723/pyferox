@@ -7,7 +7,7 @@ import pytest
 
 from pyferox import Command, Query, contract, get_contract_metadata
 from pyferox.core.errors import ValidationError
-from pyferox.schema import TypedSchema, parse_input, serialize_output
+from pyferox.schema import TypedSchema, get_schema_metadata, parse_input, schema_metadata, serialize_output
 from pyferox.schema import runtime as schema_runtime
 
 
@@ -142,3 +142,40 @@ def test_contract_metadata_helpers() -> None:
     metadata = get_contract_metadata(parsed)
     assert metadata["audience"] == "internal"
     assert metadata["version"] == 1
+
+
+def test_schema_metadata_decorator_and_getter() -> None:
+    @schema_metadata(title="Create User", description="Create user payload")
+    class CreateUser(msgspec.Struct):
+        email: str
+
+    metadata = get_schema_metadata(CreateUser)
+    assert metadata["title"] == "Create User"
+    assert metadata["description"] == "Create user payload"
+
+
+def test_parse_input_runs_instance_and_class_validators() -> None:
+    class Input(msgspec.Struct):
+        value: int
+
+        def __validate__(self) -> dict[str, str] | None:
+            if self.value < 0:
+                return {"value": "Must be non-negative"}
+            return None
+
+    with pytest.raises(ValidationError) as exc:
+        parse_input(Input, {"value": -1})
+    assert exc.value.details["value"] == "Must be non-negative"
+
+    class ClassValidated(msgspec.Struct):
+        value: int
+
+        @classmethod
+        def validate_payload(cls, payload: "ClassValidated") -> dict[str, str] | None:
+            if payload.value > 10:
+                return {"value": "Too large"}
+            return None
+
+    with pytest.raises(ValidationError) as exc2:
+        parse_input(ClassValidated, {"value": 11})
+    assert exc2.value.details["value"] == "Too large"

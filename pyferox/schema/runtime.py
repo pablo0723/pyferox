@@ -33,6 +33,22 @@ class DTO(SchemaModel):
     """Alias for response/data transfer contracts."""
 
 
+def schema_metadata(**metadata: Any):
+    """Attach schema metadata for docs and diagnostics."""
+
+    def decorator(schema_type: type[Any]) -> type[Any]:
+        setattr(schema_type, "__pyferox_schema_metadata__", dict(metadata))
+        return schema_type
+
+    return decorator
+
+
+def get_schema_metadata(schema_or_type: Any) -> dict[str, Any]:
+    schema_type = schema_or_type if isinstance(schema_or_type, type) else type(schema_or_type)
+    metadata = getattr(schema_type, "__pyferox_schema_metadata__", {})
+    return dict(metadata)
+
+
 class TypedSchema(Generic[TIn, TOut]):
     def __init__(self, input_type: type[TIn], output_type: type[TOut] | None = None) -> None:
         self.input_type = input_type
@@ -56,13 +72,17 @@ def parse_input(
     error_message: str = "Input validation failed",
 ) -> Any:
     if _is_message_contract(schema_type):
-        return _parse_message_contract(schema_type, payload, error_message=error_message)
+        parsed = _parse_message_contract(schema_type, payload, error_message=error_message)
+        _apply_validation_hooks(schema_type, parsed, error_message=error_message)
+        return parsed
     if _is_schema_model(schema_type) and isinstance(payload, dict):
         issues = _schema_model_field_issues(schema_type, payload)
         if issues:
             raise ValidationError(error_message, details=issues)
     try:
-        return msgspec.convert(payload, type=schema_type, strict=False)
+        parsed = msgspec.convert(payload, type=schema_type, strict=False)
+        _apply_validation_hooks(schema_type, parsed, error_message=error_message)
+        return parsed
     except msgspec.ValidationError as exc:
         fallback = _try_construct_from_kwargs(schema_type, payload)
         if fallback is not None:
@@ -161,7 +181,10 @@ def _parse_message_contract(schema_type: type[Message], payload: Any, *, error_m
         raise ValidationError(error_message, details=_details_from_msgspec_error(exc)) from exc
     data = msgspec.to_builtins(parsed)
     if is_dataclass(schema_type):
-        return schema_type(**data)
+        try:
+            return msgspec.convert(data, type=schema_type, strict=False)
+        except msgspec.ValidationError as exc:
+            raise ValidationError(error_message, details=_details_from_msgspec_error(exc)) from exc
 
     try:
         return schema_type(**data)
@@ -197,6 +220,24 @@ def _get_contract_schema(schema_type: type[Message]) -> type[msgspec.Struct]:
 
 def _is_schema_model(schema_type: type[Any]) -> bool:
     return inspect.isclass(schema_type) and issubclass(schema_type, SchemaModel)
+
+
+def _apply_validation_hooks(schema_type: type[Any], value: Any, *, error_message: str) -> None:
+    instance_validator = getattr(value, "__validate__", None)
+    if callable(instance_validator):
+        result = instance_validator()
+        if inspect.isawaitable(result):  # pragma: no cover
+            raise ValidationError(f"{error_message}: async validators are not supported in parse_input")
+        if isinstance(result, dict):
+            raise ValidationError(error_message, details={str(k): str(v) for k, v in result.items()})
+
+    class_validator = getattr(schema_type, "validate_payload", None)
+    if callable(class_validator):
+        result = class_validator(value)
+        if inspect.isawaitable(result):  # pragma: no cover
+            raise ValidationError(f"{error_message}: async validators are not supported in parse_input")
+        if isinstance(result, dict):
+            raise ValidationError(error_message, details={str(k): str(v) for k, v in result.items()})
 
 
 def _schema_model_field_issues(schema_type: type[SchemaModel], payload: dict[str, Any]) -> dict[str, str]:

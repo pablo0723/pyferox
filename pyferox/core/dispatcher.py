@@ -23,6 +23,24 @@ def _identity_exception_mapper(exc: Exception) -> Exception:
     return exc
 
 
+def _safe_type_hints(fn: HandlerFn) -> dict[str, Any]:
+    try:
+        return get_type_hints(fn)
+    except Exception:
+        annotations = inspect.get_annotations(fn, eval_str=False)
+        resolved: dict[str, Any] = {}
+        globals_ns = getattr(fn, "__globals__", {})
+        for name, annotation in annotations.items():
+            if not isinstance(annotation, str):
+                resolved[name] = annotation
+                continue
+            try:
+                resolved[name] = eval(annotation, globals_ns, {})
+            except Exception:
+                resolved[name] = annotation
+        return resolved
+
+
 class SyncPolicy(StrEnum):
     ALLOW = "allow"
     FORBID = "forbid"
@@ -113,7 +131,7 @@ class Dispatcher:
     ) -> Any:
         kwargs: dict[str, Any] = {}
         signature = inspect.signature(fn)
-        hints = get_type_hints(fn)
+        hints = _safe_type_hints(fn)
         params = list(signature.parameters.values())
         if not params:
             raise TypeError(f"Handler must accept at least one argument for message/event: {fn}")
@@ -122,7 +140,7 @@ class Dispatcher:
             if index == 0:
                 continue
             annotated_type = hints.get(param.name)
-            if annotated_type is None:
+            if annotated_type is None or isinstance(annotated_type, str):
                 if param.default is not inspect.Parameter.empty:
                     continue
                 raise ResolutionError(

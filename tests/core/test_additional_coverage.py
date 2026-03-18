@@ -12,9 +12,11 @@ from pyferox.core import (
     Event,
     HandlerNotFoundError,
     LifecycleManager,
+    Query,
     SyncPolicy,
     handle,
     map_exception_to_transport,
+    module_diagnostics,
 )
 from pyferox.core.context import ExecutionContext
 from pyferox.core.di import Container, Provider, ResolutionError, Scope, provider
@@ -274,6 +276,10 @@ def test_module_declared_contract_enforcement() -> None:
     app = App(modules=[module])
     assert asyncio.run(app.execute(Ping(value="ok"))) == "ok"
     assert calls == ["before", "after"]
+    info = module.diagnostics()
+    assert info["commands"] == ["Ping"]
+    assert info["exports"] == ["Ping"]
+    assert module_diagnostics([module])[0]["name"] == "ping"
 
     @dataclass(slots=True)
     class Other(Command):
@@ -285,6 +291,29 @@ def test_module_declared_contract_enforcement() -> None:
 
     with pytest.raises(ValueError):
         App(modules=[RawModule(name="bad", commands=[Ping], handlers=[wrong_handler])])
+
+    @dataclass(slots=True)
+    class Imported(Query):
+        value: str
+
+    @handle(Imported)
+    async def imported_handler(message: Imported) -> str:
+        return message.value
+
+    provider_module = RawModule(
+        name="provider",
+        queries=[Imported],
+        handlers=[imported_handler],
+        exports=[Imported],
+    )
+    consumer_module = RawModule(name="consumer", queries=[Imported], imports=[provider_module])
+    app2 = App(modules=[consumer_module])
+    assert asyncio.run(app2.execute(Imported(value="x"))) == "x"
+    consumer_info = consumer_module.diagnostics()
+    assert consumer_info["imported_exports"] == ["Imported"]
+
+    with pytest.raises(ValueError):
+        RawModule(name="bad-export", exports=[Ping]).validate_imports()
 
 
 def test_dispatcher_exception_hooks_and_result_normalization() -> None:

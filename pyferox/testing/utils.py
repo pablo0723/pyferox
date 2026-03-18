@@ -16,6 +16,21 @@ def create_test_app(*, modules: list[Module] | None = None) -> App:
     return App(modules=modules or [])
 
 
+def create_test_module(
+    *,
+    name: str = "test-module",
+    handlers: list[Any] | None = None,
+    listeners: list[Any] | None = None,
+    providers: list[Provider] | None = None,
+) -> Module:
+    return Module(
+        name=name,
+        handlers=list(handlers or []),
+        listeners=list(listeners or []),
+        providers=list(providers or []),
+    )
+
+
 class FakeDispatcher:
     def __init__(self) -> None:
         self.calls: list[Any] = []
