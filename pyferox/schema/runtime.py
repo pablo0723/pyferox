@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 import re
-from dataclasses import is_dataclass
+from dataclasses import MISSING as DATACLASS_MISSING, fields as dataclass_fields, is_dataclass
 from typing import Any, ClassVar, Generic, TypeVar, get_origin, get_type_hints
 
 import msgspec
@@ -201,13 +201,25 @@ def _get_contract_schema(schema_type: type[Message]) -> type[msgspec.Struct]:
         return cached
 
     hints = get_type_hints(schema_type, include_extras=True)
+    dataclass_field_map = {}
+    if is_dataclass(schema_type):
+        dataclass_field_map = {item.name: item for item in dataclass_fields(schema_type)}
     fields: list[tuple[Any, ...]] = []
     for name, annotation in hints.items():
         if name.startswith("_"):
             continue
         if get_origin(annotation) is ClassVar:
             continue
-        default = getattr(schema_type, name, msgspec.NODEFAULT)
+        if name in dataclass_field_map:
+            field_info = dataclass_field_map[name]
+            if field_info.default is not DATACLASS_MISSING:
+                default = field_info.default
+            elif field_info.default_factory is not DATACLASS_MISSING:
+                default = field_info.default_factory()
+            else:
+                default = msgspec.NODEFAULT
+        else:
+            default = getattr(schema_type, name, msgspec.NODEFAULT)
         if default is msgspec.NODEFAULT:
             fields.append((name, annotation))
         else:

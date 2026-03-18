@@ -5,7 +5,15 @@ from pathlib import Path
 
 import pytest
 
-from pyferox.config import ChainedSecretProvider, ConfigProfile, DictSecretProvider, FileSecretProvider, load_config, load_env_file
+from pyferox.config import (
+    ChainedSecretProvider,
+    ConfigProfile,
+    DictSecretProvider,
+    FileSecretProvider,
+    load_config,
+    load_env_file,
+    load_module_config,
+)
 
 
 def test_load_env_file_skips_invalid_lines_and_respects_override(tmp_path: Path, monkeypatch) -> None:
@@ -71,3 +79,20 @@ def test_load_config_composes_module_level_settings(monkeypatch) -> None:
     assert cfg.modules["users"].values["max_page_size"] == 250
     assert cfg.modules["users"].values["enabled"] is True
     assert cfg.modules["billing"].values["tax_rate"] == 0.2
+
+
+def test_load_module_config_skips_invalid_keys_and_scalar_fallback_paths(monkeypatch) -> None:
+    monkeypatch.setenv("PYFEROX_MODULE_USERS__ACTIVE", "off")
+    monkeypatch.setenv("PYFEROX_MODULE_USERS__LABEL", "raw-value")
+    monkeypatch.setenv("PYFEROX_MODULE_USERS__RATE", "1.5")
+    monkeypatch.setenv("PYFEROX_MODULE_BROKEN", "value")
+    monkeypatch.setenv("PYFEROX_MODULE___EMPTY", "value")
+    monkeypatch.setenv("PYFEROX_MODULE_USERS__", "value")
+
+    modules = load_module_config("PYFEROX_")
+
+    assert modules["users"].values["active"] is False
+    assert modules["users"].values["label"] == "raw-value"
+    assert modules["users"].values["rate"] == 1.5
+    assert "broken" not in modules
+    assert "" not in modules

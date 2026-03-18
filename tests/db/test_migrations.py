@@ -26,6 +26,7 @@ def test_migration_helpers_delegate_to_alembic(monkeypatch) -> None:
 
     assert migration_init().ok is True
     assert migration_revision(message="init", autogenerate=True).ok is True
+    assert migration_revision(message="manual", autogenerate=False).ok is True
     assert migration_upgrade().ok is True
     assert migration_downgrade(revision="-1").ok is True
     assert migration_current().ok is True
@@ -33,7 +34,8 @@ def test_migration_helpers_delegate_to_alembic(monkeypatch) -> None:
     assert calls[0][:2] == ["/usr/bin/alembic", "init"]
     assert calls[1][:4] == ["/usr/bin/alembic", "revision", "-m", "init"]
     assert "--autogenerate" in calls[1]
-    assert calls[2] == ["/usr/bin/alembic", "upgrade", "head"]
-    assert calls[3] == ["/usr/bin/alembic", "downgrade", "-1"]
-    assert calls[4] == ["/usr/bin/alembic", "current"]
-
+    assert calls[2] == ["/usr/bin/alembic", "revision", "-m", "manual"]
+    assert "--autogenerate" not in calls[2]
+    assert calls[3] == ["/usr/bin/alembic", "upgrade", "head"]
+    assert calls[4] == ["/usr/bin/alembic", "downgrade", "-1"]
+    assert calls[5] == ["/usr/bin/alembic", "current"]

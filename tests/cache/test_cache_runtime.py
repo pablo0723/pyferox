@@ -49,3 +49,20 @@ def test_in_memory_cache_invalidation_hooks() -> None:
     asyncio.run(run())
     assert invalidated == ["a", "b"]
 
+
+def test_in_memory_cache_delete_missing_and_sync_hook_branches() -> None:
+    cache = InMemoryCache()
+    invalidated: list[str] = []
+
+    def hook(key: str) -> None:
+        invalidated.append(key)
+
+    cache.add_invalidation_hook(hook)
+
+    async def run() -> None:
+        await cache.delete("missing")
+        await cache.set("x", 1)
+        await cache.delete("x")
+
+    asyncio.run(run())
+    assert invalidated == ["x"]

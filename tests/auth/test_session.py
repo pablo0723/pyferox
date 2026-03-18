@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 
-from pyferox.auth import InMemorySessionStore, Session, SessionAuthBackend
+from pyferox.auth import AccessToken, InMemorySessionStore, Session, SessionAuthBackend
 
 
 def test_in_memory_session_store_and_backend() -> None:
@@ -49,3 +49,22 @@ def test_session_store_expired_session_is_not_returned() -> None:
 
     asyncio.run(run())
 
+
+def test_access_token_expiration_and_backend_none_token_paths() -> None:
+    now = datetime.now(tz=timezone.utc)
+    expired = AccessToken(token="t1", subject="u1", expires_at=now - timedelta(seconds=1))
+    non_expiring = AccessToken(token="t2", subject="u2")
+    assert expired.is_expired(now=now) is True
+    assert non_expiring.is_expired(now=now) is False
+
+    store = InMemorySessionStore()
+    backend = SessionAuthBackend(store)
+
+    async def run() -> None:
+        assert await backend.authenticate(None) is None
+        await store.set(Session(session_id="s1", subject="user", data={"email": 123}))
+        principal = await backend.authenticate("s1")
+        assert principal is not None
+        assert principal.identity.email is None
+
+    asyncio.run(run())

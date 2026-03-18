@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import ClassVar
 
 import msgspec
 import pytest
@@ -20,6 +21,26 @@ class FailingPlainModel:
     def __init__(self, value: int, required: str) -> None:
         self.value = value
         self.required = required
+
+
+@dataclass(slots=True)
+class _InnerDataclass:
+    count: int
+
+
+@dataclass(slots=True)
+class _DataclassMessage(Command):
+    inner: _InnerDataclass
+
+
+@dataclass(slots=True)
+class _DataclassMessageWithDefault(Command):
+    count: int = 7
+
+
+@dataclass(slots=True)
+class _DataclassSecondPhaseFailure(Command):
+    count: int
 
 
 def test_parse_input_fallback_to_kwargs_constructor() -> None:
@@ -179,3 +200,62 @@ def test_parse_input_runs_instance_and_class_validators() -> None:
     with pytest.raises(ValidationError) as exc2:
         parse_input(ClassValidated, {"value": 11})
     assert exc2.value.details["value"] == "Too large"
+
+
+def test_supports_kwargs_fallback_rejects_message_subclass() -> None:
+    class Msg(Command):
+        value: int
+
+    assert schema_runtime._supports_kwargs_fallback(Msg, {"value": 1}) is False
+
+
+def test_parse_message_contract_dataclass_second_phase_validation_error() -> None:
+    with pytest.raises(ValidationError):
+        parse_input(_DataclassMessage, {"inner": {"count": "bad"}})
+
+
+def test_contract_schema_skips_classvar_and_validation_hooks_none_paths() -> None:
+    class Msg(Command):
+        value: int
+        marker: ClassVar[int] = 5
+
+        def __validate__(self):  # type: ignore[no-untyped-def]
+            return None
+
+        @classmethod
+        def validate_payload(cls, payload):  # type: ignore[no-untyped-def]
+            return None
+
+    parsed = parse_input(Msg, {"value": 1})
+    assert parsed.value == 1
+    schema = schema_runtime._get_contract_schema(Msg)
+    assert "marker" not in schema.__struct_fields__
+
+
+def test_get_contract_schema_for_dataclass_uses_field_default_branch() -> None:
+    if hasattr(_DataclassMessageWithDefault, "__pyferox_contract_schema__"):
+        delattr(_DataclassMessageWithDefault, "__pyferox_contract_schema__")
+
+    schema = schema_runtime._get_contract_schema(_DataclassMessageWithDefault)
+    assert schema.__struct_defaults__ == (7,)
+
+    parsed = parse_input(_DataclassMessageWithDefault, {})
+    assert parsed.count == 7
+
+
+def test_parse_message_contract_dataclass_second_phase_validation_error_branch(monkeypatch) -> None:
+    if hasattr(_DataclassSecondPhaseFailure, "__pyferox_contract_schema__"):
+        delattr(_DataclassSecondPhaseFailure, "__pyferox_contract_schema__")
+
+    original_convert = schema_runtime.msgspec.convert
+
+    def fake_convert(payload, type, strict=False):  # type: ignore[no-untyped-def]
+        if type is _DataclassSecondPhaseFailure:
+            raise msgspec.ValidationError("Object missing required field `count`")
+        return original_convert(payload, type=type, strict=strict)
+
+    monkeypatch.setattr(schema_runtime.msgspec, "convert", fake_convert)
+
+    with pytest.raises(ValidationError) as exc:
+        parse_input(_DataclassSecondPhaseFailure, {"count": 1})
+    assert exc.value.details["count"] == "Field is required"

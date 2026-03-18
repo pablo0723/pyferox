@@ -285,8 +285,451 @@ def test_run_ops_diagnostics_with_runtime_object(monkeypatch, capsys) -> None:
     assert payload["workers"] == 1
 
 
+def test_run_jobs_branch_matrix(monkeypatch) -> None:
+    from pyferox import App
+    from pyferox.jobs import JobDispatcher, LocalJobWorker
+
+    worker_module = types.ModuleType("demo_jobs_worker")
+    worker_module.worker = LocalJobWorker(JobDispatcher(App()))
+    monkeypatch.setitem(sys.modules, "demo_jobs_worker", worker_module)
+    cli_main._run_jobs("demo_jobs_worker:worker", idle_rounds=1)
+
+    sync_module = types.ModuleType("demo_jobs_sync")
+
+    class SyncObj:
+        def __init__(self) -> None:
+            self.called = 0
+
+        def run_until_idle(self, idle_rounds=1):  # type: ignore[no-untyped-def]
+            self.called += idle_rounds
+            return None
+
+    sync_obj = SyncObj()
+    sync_module.obj = sync_obj
+    monkeypatch.setitem(sys.modules, "demo_jobs_sync", sync_module)
+    cli_main._run_jobs("demo_jobs_sync:obj", idle_rounds=2)
+    assert sync_obj.called == 2
+
+    callable_module = types.ModuleType("demo_jobs_callable")
+
+    class Nested:
+        async def run_until_idle(self, idle_rounds=1):  # type: ignore[no-untyped-def]
+            return None
+
+    callable_module.factory = lambda: Nested()
+    monkeypatch.setitem(sys.modules, "demo_jobs_callable", callable_module)
+    cli_main._run_jobs("demo_jobs_callable:factory", idle_rounds=1)
+
+    bad_module = types.ModuleType("demo_jobs_bad")
+    bad_module.bad = object()
+    monkeypatch.setitem(sys.modules, "demo_jobs_bad", bad_module)
+    with pytest.raises(RuntimeError):
+        cli_main._run_jobs("demo_jobs_bad:bad", idle_rounds=1)
+
+
+def test_run_worker_branch_matrix(monkeypatch) -> None:
+    sync_dispatch_module = types.ModuleType("demo_worker_sync_dispatch")
+
+    class SyncDispatcher:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run_once(self, timeout=0.0):  # type: ignore[no-untyped-def]
+            self.calls += 1
+
+    class SyncDispatchWorker:
+        def __init__(self) -> None:
+            self.dispatcher = SyncDispatcher()
+
+    worker = SyncDispatchWorker()
+    sync_dispatch_module.worker = worker
+    monkeypatch.setitem(sys.modules, "demo_worker_sync_dispatch", sync_dispatch_module)
+    cli_main._run_worker("demo_worker_sync_dispatch:worker", idle_timeout=0.01, max_iterations=2)
+    assert worker.dispatcher.calls == 2
+
+    run_forever_module = types.ModuleType("demo_worker_forever")
+
+    class Forever:
+        def __init__(self) -> None:
+            self.called = 0
+
+        def run_forever(self, poll_interval=0.0):  # type: ignore[no-untyped-def]
+            self.called += 1
+
+    forever = Forever()
+    run_forever_module.worker = forever
+    monkeypatch.setitem(sys.modules, "demo_worker_forever", run_forever_module)
+    cli_main._run_worker("demo_worker_forever:worker", idle_timeout=0.01)
+    assert forever.called == 1
+
+    run_module = types.ModuleType("demo_worker_run")
+
+    class Runner:
+        def __init__(self) -> None:
+            self.called = 0
+
+        def run(self, idle_timeout=0.0):  # type: ignore[no-untyped-def]
+            self.called += 1
+
+    runner = Runner()
+    run_module.worker = runner
+    monkeypatch.setitem(sys.modules, "demo_worker_run", run_module)
+    cli_main._run_worker("demo_worker_run:worker", idle_timeout=0.01)
+    assert runner.called == 1
+
+    until_idle_module = types.ModuleType("demo_worker_idle")
+
+    class Idle:
+        def __init__(self) -> None:
+            self.called = 0
+
+        def run_until_idle(self, idle_rounds=1, timeout=0.0):  # type: ignore[no-untyped-def]
+            self.called += idle_rounds
+
+    idle = Idle()
+    until_idle_module.worker = idle
+    monkeypatch.setitem(sys.modules, "demo_worker_idle", until_idle_module)
+    cli_main._run_worker("demo_worker_idle:worker", max_iterations=3)
+    assert idle.called == 3
+
+    callable_module = types.ModuleType("demo_worker_callable")
+    callable_module.factory = lambda: idle
+    monkeypatch.setitem(sys.modules, "demo_worker_callable", callable_module)
+    cli_main._run_worker("demo_worker_callable:factory", max_iterations=1)
+
+    bad_module = types.ModuleType("demo_worker_bad")
+    bad_module.bad = object()
+    monkeypatch.setitem(sys.modules, "demo_worker_bad", bad_module)
+    with pytest.raises(RuntimeError):
+        cli_main._run_worker("demo_worker_bad:bad")
+
+
+def test_run_scheduler_branch_matrix(monkeypatch) -> None:
+    run_once_module = types.ModuleType("demo_sched_once")
+
+    class Once:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run_once(self):  # type: ignore[no-untyped-def]
+            self.calls += 1
+
+    once = Once()
+    run_once_module.scheduler = once
+    monkeypatch.setitem(sys.modules, "demo_sched_once", run_once_module)
+    cli_main._run_scheduler("demo_sched_once:scheduler", ticks=2)
+    assert once.calls == 2
+
+    run_pending_module = types.ModuleType("demo_sched_pending")
+
+    class Pending:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run_pending(self):  # type: ignore[no-untyped-def]
+            self.calls += 1
+
+    pending = Pending()
+    run_pending_module.scheduler = pending
+    monkeypatch.setitem(sys.modules, "demo_sched_pending", run_pending_module)
+    cli_main._run_scheduler("demo_sched_pending:scheduler", ticks=2)
+    assert pending.calls == 2
+
+    callable_module = types.ModuleType("demo_sched_callable")
+    callable_module.factory = lambda: pending
+    monkeypatch.setitem(sys.modules, "demo_sched_callable", callable_module)
+    cli_main._run_scheduler("demo_sched_callable:factory", ticks=1)
+
+    bad_module = types.ModuleType("demo_sched_bad")
+    bad_module.bad = object()
+    monkeypatch.setitem(sys.modules, "demo_sched_bad", bad_module)
+    with pytest.raises(RuntimeError):
+        cli_main._run_scheduler("demo_sched_bad:bad")
+
+
+def test_run_health_check_branch_matrix(monkeypatch, capsys) -> None:
+    from pyferox.ops import HealthRegistry, HealthReport
+    from pyferox.ops.runtime import HealthCheckResult
+
+    registry = HealthRegistry()
+    registry.add_readiness("ok", lambda: True)
+    module_registry = types.ModuleType("demo_health_registry")
+    module_registry.registry = registry
+    monkeypatch.setitem(sys.modules, "demo_health_registry", module_registry)
+    cli_main._run_health_check("demo_health_registry:registry")
+    assert json.loads(capsys.readouterr().out)["ok"] is True
+
+    class ReportObj:
+        def to_payload(self) -> dict[str, object]:
+            return {"ok": True, "via": "report"}
+
+    module_report = types.ModuleType("demo_health_report")
+    module_report.obj = type("Obj", (), {"run_readiness": lambda self: ReportObj()})()
+    monkeypatch.setitem(sys.modules, "demo_health_report", module_report)
+    cli_main._run_health_check("demo_health_report:obj")
+
+    module_bool = types.ModuleType("demo_health_bool")
+    module_bool.obj = type("Obj", (), {"run_readiness": lambda self: False})()
+    monkeypatch.setitem(sys.modules, "demo_health_bool", module_bool)
+    with pytest.raises(RuntimeError):
+        cli_main._run_health_check("demo_health_bool:obj")
+
+    module_callable = types.ModuleType("demo_health_callable")
+    module_callable.obj = lambda: {"ok": True}
+    monkeypatch.setitem(sys.modules, "demo_health_callable", module_callable)
+    cli_main._run_health_check("demo_health_callable:obj")
+
+    module_bad = types.ModuleType("demo_health_bad")
+    module_bad.obj = object()
+    monkeypatch.setitem(sys.modules, "demo_health_bad", module_bad)
+    with pytest.raises(RuntimeError):
+        cli_main._run_health_check("demo_health_bad:obj")
+
+
+def test_run_ops_diagnostics_branch_matrix(monkeypatch, capsys) -> None:
+    from pyferox.ops import HealthRegistry, InMemoryTraceCollector
+
+    module_diag_sync = types.ModuleType("demo_ops_sync")
+    module_diag_sync.obj = type("Obj", (), {"diagnostics": lambda self: {"ok": True, "x": 1}})()
+    monkeypatch.setitem(sys.modules, "demo_ops_sync", module_diag_sync)
+    cli_main._run_ops_diagnostics("demo_ops_sync:obj")
+    assert json.loads(capsys.readouterr().out)["ok"] is True
+
+    module_callable = types.ModuleType("demo_ops_callable")
+    module_callable.obj = lambda: {"ok": True, "y": 2}
+    monkeypatch.setitem(sys.modules, "demo_ops_callable", module_callable)
+    cli_main._run_ops_diagnostics("demo_ops_callable:obj")
+
+    health = HealthRegistry()
+    health.add_liveness("live", lambda: True)
+    health.add_readiness("ready", lambda: True)
+    trace = InMemoryTraceCollector()
+    module_attrs = types.ModuleType("demo_ops_attrs")
+    module_attrs.obj = type("Obj", (), {"health_registry": health, "trace_collector": trace})()
+    monkeypatch.setitem(sys.modules, "demo_ops_attrs", module_attrs)
+    cli_main._run_ops_diagnostics("demo_ops_attrs:obj")
+
+    module_health = types.ModuleType("demo_ops_health")
+    module_health.obj = health
+    monkeypatch.setitem(sys.modules, "demo_ops_health", module_health)
+    cli_main._run_ops_diagnostics("demo_ops_health:obj")
+
+    module_trace = types.ModuleType("demo_ops_trace")
+    module_trace.obj = trace
+    monkeypatch.setitem(sys.modules, "demo_ops_trace", module_trace)
+    cli_main._run_ops_diagnostics("demo_ops_trace:obj")
+
+    module_bad = types.ModuleType("demo_ops_bad")
+    module_bad.obj = object()
+    monkeypatch.setitem(sys.modules, "demo_ops_bad", module_bad)
+    with pytest.raises(RuntimeError):
+        cli_main._run_ops_diagnostics("demo_ops_bad:obj")
+
+    module_not_ok = types.ModuleType("demo_ops_not_ok")
+    module_not_ok.obj = lambda: {"ok": False}
+    monkeypatch.setitem(sys.modules, "demo_ops_not_ok", module_not_ok)
+    with pytest.raises(RuntimeError):
+        cli_main._run_ops_diagnostics("demo_ops_not_ok:obj")
+
+
+def test_run_migration_branches_and_unknown(monkeypatch, capsys) -> None:
+    class Result:
+        def __init__(self, stdout="", stderr="", ok=True, returncode=0) -> None:
+            self.stdout = stdout
+            self.stderr = stderr
+            self.ok = ok
+            self.returncode = returncode
+
+    monkeypatch.setattr("pyferox.db.migration_init", lambda directory="migrations", cwd=".": Result(stdout="init"))
+    monkeypatch.setattr("pyferox.db.migration_revision", lambda message, autogenerate=False, cwd=".": Result(stdout="rev"))
+    monkeypatch.setattr("pyferox.db.migration_downgrade", lambda revision, cwd=".": Result(stderr="warn"))
+    monkeypatch.setattr("pyferox.db.migration_current", lambda cwd=".": Result(stdout="cur"))
+
+    cli_main._run_migration("init")
+    cli_main._run_migration("revision", message="x")
+    cli_main._run_migration("downgrade", revision="-1")
+    cli_main._run_migration("current")
+    output = capsys.readouterr()
+    assert "init" in output.out
+    assert "rev" in output.out
+    assert "cur" in output.out
+    assert "warn" in output.err
+
+    with pytest.raises(RuntimeError):
+        cli_main._run_migration("unknown")
+
+
 def test_env_diagnostics_prints_json(capsys) -> None:
     cli_main._env_diagnostics()
     payload = json.loads(capsys.readouterr().out)
     assert "python_version" in payload
     assert "platform" in payload
+
+
+def test_run_jobs_async_callable_and_missing_nested_runner_paths(monkeypatch) -> None:
+    async_callable_module = types.ModuleType("demo_jobs_async_callable")
+
+    async def async_callable() -> None:
+        return None
+
+    async_callable_module.obj = async_callable
+    monkeypatch.setitem(sys.modules, "demo_jobs_async_callable", async_callable_module)
+    cli_main._run_jobs("demo_jobs_async_callable:obj", idle_rounds=1)
+
+    nested_sync_module = types.ModuleType("demo_jobs_nested_sync")
+
+    class NestedSync:
+        def __init__(self) -> None:
+            self.called = 0
+
+        def run_until_idle(self, idle_rounds=1):  # type: ignore[no-untyped-def]
+            self.called += idle_rounds
+            return None
+
+    nested = NestedSync()
+    nested_sync_module.obj = lambda: nested
+    monkeypatch.setitem(sys.modules, "demo_jobs_nested_sync", nested_sync_module)
+    cli_main._run_jobs("demo_jobs_nested_sync:obj", idle_rounds=2)
+    assert nested.called == 2
+
+    no_nested_module = types.ModuleType("demo_jobs_no_nested")
+    no_nested_module.obj = lambda: object()
+    monkeypatch.setitem(sys.modules, "demo_jobs_no_nested", no_nested_module)
+    with pytest.raises(RuntimeError):
+        cli_main._run_jobs("demo_jobs_no_nested:obj", idle_rounds=1)
+
+
+def test_run_worker_async_execution_paths(monkeypatch) -> None:
+    forever_module = types.ModuleType("demo_worker_async_forever")
+
+    class AsyncForever:
+        def __init__(self) -> None:
+            self.called = 0
+
+        async def run_forever(self, poll_interval=0.0):  # type: ignore[no-untyped-def]
+            self.called += 1
+
+    forever = AsyncForever()
+    forever_module.worker = forever
+    monkeypatch.setitem(sys.modules, "demo_worker_async_forever", forever_module)
+    cli_main._run_worker("demo_worker_async_forever:worker", idle_timeout=0.01)
+    assert forever.called == 1
+
+    run_module = types.ModuleType("demo_worker_async_run")
+
+    class AsyncRun:
+        def __init__(self) -> None:
+            self.called = 0
+
+        async def run(self, idle_timeout=0.0):  # type: ignore[no-untyped-def]
+            self.called += 1
+
+    runner = AsyncRun()
+    run_module.worker = runner
+    monkeypatch.setitem(sys.modules, "demo_worker_async_run", run_module)
+    cli_main._run_worker("demo_worker_async_run:worker", idle_timeout=0.01)
+    assert runner.called == 1
+
+    idle_module = types.ModuleType("demo_worker_async_idle")
+
+    class AsyncIdle:
+        def __init__(self) -> None:
+            self.called = 0
+
+        async def run_until_idle(self, idle_rounds=1, timeout=0.0):  # type: ignore[no-untyped-def]
+            self.called += idle_rounds
+
+    idle = AsyncIdle()
+    idle_module.worker = idle
+    monkeypatch.setitem(sys.modules, "demo_worker_async_idle", idle_module)
+    cli_main._run_worker("demo_worker_async_idle:worker", max_iterations=2)
+    assert idle.called == 2
+
+    callable_module = types.ModuleType("demo_worker_async_callable")
+
+    async def factory() -> AsyncIdle:
+        return idle
+
+    callable_module.obj = factory
+    monkeypatch.setitem(sys.modules, "demo_worker_async_callable", callable_module)
+    cli_main._run_worker("demo_worker_async_callable:obj", max_iterations=1)
+
+
+def test_run_scheduler_async_branches(monkeypatch) -> None:
+    pending_module = types.ModuleType("demo_scheduler_async_pending")
+
+    class AsyncPending:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def run_pending(self):  # type: ignore[no-untyped-def]
+            self.calls += 1
+
+    pending = AsyncPending()
+    pending_module.scheduler = pending
+    monkeypatch.setitem(sys.modules, "demo_scheduler_async_pending", pending_module)
+    cli_main._run_scheduler("demo_scheduler_async_pending:scheduler", ticks=2)
+    assert pending.calls == 2
+
+    once_module = types.ModuleType("demo_scheduler_async_once")
+
+    class AsyncOnce:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def run_once(self) -> None:
+            self.calls += 1
+
+    once = AsyncOnce()
+
+    async def factory() -> AsyncOnce:
+        return once
+
+    once_module.scheduler = factory
+    monkeypatch.setitem(sys.modules, "demo_scheduler_async_once", once_module)
+    cli_main._run_scheduler("demo_scheduler_async_once:scheduler", ticks=1)
+    assert once.calls == 1
+
+
+def test_run_health_check_async_callable_and_non_dict_result_paths(monkeypatch, capsys) -> None:
+    async_module = types.ModuleType("demo_health_async_callable")
+
+    async def async_check() -> dict[str, object]:
+        return {"ok": True, "source": "async"}
+
+    async_module.obj = async_check
+    monkeypatch.setitem(sys.modules, "demo_health_async_callable", async_module)
+    cli_main._run_health_check("demo_health_async_callable:obj")
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+
+    truthy_module = types.ModuleType("demo_health_truthy")
+    truthy_module.obj = lambda: 2
+    monkeypatch.setitem(sys.modules, "demo_health_truthy", truthy_module)
+    cli_main._run_health_check("demo_health_truthy:obj")
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+
+
+def test_run_ops_diagnostics_async_non_dict_fallback_paths(monkeypatch, capsys) -> None:
+    from pyferox.ops import HealthRegistry
+
+    health = HealthRegistry()
+
+    class Runtime:
+        def __init__(self) -> None:
+            self.health_registry = health
+
+        async def diagnostics(self) -> object:
+            return "not-a-dict"
+
+        async def __call__(self) -> object:
+            return "still-not-a-dict"
+
+    module = types.ModuleType("demo_ops_async_fallback")
+    module.runtime = Runtime()
+    monkeypatch.setitem(sys.modules, "demo_ops_async_fallback", module)
+
+    cli_main._run_ops_diagnostics("demo_ops_async_fallback:runtime")
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
